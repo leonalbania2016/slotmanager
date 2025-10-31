@@ -24,7 +24,7 @@ OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", f"{BACKEND_URL}/auth/callba
 SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
 
 # Cloudinary setup
-cloudinary.config_from_url(os.getenv("CLOUDINARY_URL", ""))
+cloudinary.config(os.getenv("CLOUDINARY_URL", ""))
 
 app = FastAPI()
 app.add_middleware(

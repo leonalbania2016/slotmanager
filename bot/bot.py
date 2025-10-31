@@ -89,3 +89,10 @@ async def main():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
+
+import os
+import uvicorn
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))  # Render gives you a PORT env var
+    uvicorn.run("main:app", host="0.0.0.0", port=port)

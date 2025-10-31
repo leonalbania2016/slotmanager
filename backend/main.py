@@ -24,7 +24,21 @@ OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", f"{BACKEND_URL}/auth/callba
 SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
 
 # Cloudinary setup
-cloudinary.config(**cloudinary.utils.parse_url(os.getenv("CLOUDINARY_URL", "")))
+import os
+import cloudinary
+
+CLOUDINARY_URL = os.getenv("CLOUDINARY_URL", "")
+
+if CLOUDINARY_URL:
+    os.environ["CLOUDINARY_URL"] = CLOUDINARY_URL  # ensure it's visible to SDK
+    cloudinary.config(secure=True)
+else:
+    cloudinary.config(
+        cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+        api_key=os.getenv("CLOUDINARY_API_KEY"),
+        api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+        secure=True
+    )
 
 
 

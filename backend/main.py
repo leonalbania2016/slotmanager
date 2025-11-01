@@ -84,29 +84,8 @@ def auth_login():
 
 @app.get("/auth/callback")
 async def auth_callback(code: str):
-    async with httpx.AsyncClient() as client:
-        data = {
-            "client_id": DISCORD_CLIENT_ID,
-            "client_secret": DISCORD_CLIENT_SECRET,
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": OAUTH_REDIRECT_URI
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        r = await client.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
-        r.raise_for_status()
-        tokens = r.json()
-        access_token = tokens["access_token"]
+    import urllib.parse, json
 
-        r2 = await client.get("https://discord.com/api/users/@me/guilds", headers={"Authorization": f"Bearer {access_token}"})
-        r2.raise_for_status()
-        guilds = r2.json()
-    from fastapi.responses import RedirectResponse
-import urllib.parse
-import json
-
-@app.get("/auth/callback")
-async def auth_callback(code: str):
     async with httpx.AsyncClient() as client:
         data = {
             "client_id": DISCORD_CLIENT_ID,
@@ -116,19 +95,24 @@ async def auth_callback(code: str):
             "redirect_uri": OAUTH_REDIRECT_URI,
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        r = await client.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
-        r.raise_for_status()
-        tokens = r.json()
-        access_token = tokens["access_token"]
 
+        # Exchange code for access token
+        r = await client.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
+        if r.status_code != 200:
+            return JSONResponse({"error": "Token exchange failed", "details": r.text}, status_code=400)
+        tokens = r.json()
+        access_token = tokens.get("access_token")
+
+        # Fetch user's guilds
         r2 = await client.get(
             "https://discord.com/api/users/@me/guilds",
             headers={"Authorization": f"Bearer {access_token}"}
         )
-        r2.raise_for_status()
+        if r2.status_code != 200:
+            return JSONResponse({"error": "Guild fetch failed", "details": r2.text}, status_code=400)
         guilds = r2.json()
 
-    # 👇 FRONTEND redirect (encode guilds safely)
+    # ✅ Redirect user to frontend with encoded guilds
     frontend_url = os.getenv("FRONTEND_URL", "https://slotmanager-frontend.onrender.com")
     encoded_guilds = urllib.parse.quote(json.dumps(guilds))
     return RedirectResponse(f"{frontend_url}/?guilds={encoded_guilds}")

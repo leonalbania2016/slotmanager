@@ -1,5 +1,5 @@
 fastapi
-uvicorn[standard]
+uvicorn
 sqlalchemy
 python-multipart
 aiofiles
@@ -10,3 +10,4 @@ python-dotenv
 cloudinary
 python-jose[cryptography]
 requests
+pydantic

@@ -11,3 +11,4 @@ cloudinary
 python-jose[cryptography]
 requests
 pydantic
+PyJWT==2.9.0

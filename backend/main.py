@@ -101,7 +101,38 @@ async def auth_callback(code: str):
         r2 = await client.get("https://discord.com/api/users/@me/guilds", headers={"Authorization": f"Bearer {access_token}"})
         r2.raise_for_status()
         guilds = r2.json()
-    return JSONResponse({"guilds": guilds, "access_token": access_token})
+    from fastapi.responses import RedirectResponse
+import urllib.parse
+import json
+
+@app.get("/auth/callback")
+async def auth_callback(code: str):
+    async with httpx.AsyncClient() as client:
+        data = {
+            "client_id": DISCORD_CLIENT_ID,
+            "client_secret": DISCORD_CLIENT_SECRET,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": OAUTH_REDIRECT_URI,
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        r = await client.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
+        r.raise_for_status()
+        tokens = r.json()
+        access_token = tokens["access_token"]
+
+        r2 = await client.get(
+            "https://discord.com/api/users/@me/guilds",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        r2.raise_for_status()
+        guilds = r2.json()
+
+    # 👇 FRONTEND redirect (encode guilds safely)
+    frontend_url = os.getenv("FRONTEND_URL", "https://slotmanager-frontend.onrender.com")
+    encoded_guilds = urllib.parse.quote(json.dumps(guilds))
+    return RedirectResponse(f"{frontend_url}/?guilds={encoded_guilds}")
+
 
 @app.get("/api/guilds/{guild_id}/slots")
 def list_slots(guild_id: str):

@@ -82,10 +82,11 @@ def auth_login():
     }
     return RedirectResponse("https://discord.com/api/oauth2/authorize?" + urlencode(params))
 
+import jwt
+from datetime import datetime, timedelta
+
 @app.get("/auth/callback")
 async def auth_callback(code: str):
-    import urllib.parse, json
-
     async with httpx.AsyncClient() as client:
         data = {
             "client_id": DISCORD_CLIENT_ID,
@@ -95,31 +96,47 @@ async def auth_callback(code: str):
             "redirect_uri": OAUTH_REDIRECT_URI,
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
-        # Exchange code for access token
         r = await client.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
-        if r.status_code != 200:
-            return JSONResponse({"error": "Token exchange failed", "details": r.text}, status_code=400)
+        r.raise_for_status()
         tokens = r.json()
-        access_token = tokens.get("access_token")
+        access_token = tokens["access_token"]
 
-        # Fetch user's guilds
+        # Fetch guilds
         r2 = await client.get(
             "https://discord.com/api/users/@me/guilds",
             headers={"Authorization": f"Bearer {access_token}"}
         )
-        if r2.status_code != 200:
-            return JSONResponse({"error": "Guild fetch failed", "details": r2.text}, status_code=400)
+        r2.raise_for_status()
         guilds = r2.json()
 
-    # ✅ Redirect user to frontend with encoded guilds
+    # ✅ Store guild data in a short JWT
+    jwt_secret = os.getenv("SECRET_KEY", "supersecret")
+    token = jwt.encode(
+        {
+            "guilds": guilds,
+            "exp": datetime.utcnow() + timedelta(minutes=5),
+        },
+        jwt_secret,
+        algorithm="HS256"
+    )
+
     frontend_url = os.getenv("FRONTEND_URL", "https://slotmanager-frontend.onrender.com")
-    encoded_guilds = urllib.parse.quote(json.dumps(guilds))
-    return RedirectResponse(f"{frontend_url}/?guilds={encoded_guilds}")
+    return RedirectResponse(f"{frontend_url}/?token={token}")
+
+@app.get("/api/decode")
+def decode_token(token: str):
+    jwt_secret = os.getenv("SECRET_KEY", "supersecret")
+    try:
+        payload = jwt.decode(token, jwt_secret, algorithms=["HS256"])
+        return {"guilds": payload["guilds"]}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/api/guilds/{guild_id}/slots")
-def list_slots(guild_id: str):
+    @app.get("/api/guilds/{guild_id}/slots")
+    def list_slots(guild_id: str):
     db = next(get_db())
     slots = db.query(Slot).filter(Slot.guild_id == guild_id).order_by(Slot.slot_number).all()
     if not slots:

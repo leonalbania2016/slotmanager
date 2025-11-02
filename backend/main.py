@@ -461,3 +461,10 @@ def send_slots(guild_id: str, body: SendSlotsBody):
 @app.get("/")
 def root():
     return {"ok": True, "service": "slotmanager-backend"}
+# --- Database Initialization ---
+from models import Base
+from database import engine
+
+print("Initializing database...")
+Base.metadata.create_all(bind=engine)
+print("Database ready.")

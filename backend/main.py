@@ -112,7 +112,7 @@ async def auth_callback(code: str):
     async with httpx.AsyncClient() as client:
         token_data = {
             "client_id": DISCORD_CLIENT_ID,
-            "client_secret": DISCORD_CLIENT_SECRET",
+            "client_secret": DISCORD_CLIENT_SECRET,
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": OAUTH_REDIRECT_URI,

@@ -236,6 +236,7 @@ def send_slots(guild_id: str, body: SendSlotsBody):
     import numpy as np
     import time
     import os
+    from PIL import ImageFilter
 
     channel_id = body.channel_id
     headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
@@ -273,13 +274,14 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             new_frames = []
 
             for frame in reader:
+                # Convert each frame with full brightness
                 img = Image.fromarray(frame).convert("RGBA")
+                img = img.point(lambda p: min(int(p * 1.2), 255))  # safely boost brightness
 
-                # upscale for sharper text
                 upscale = 2
                 large = img.resize((img.width * upscale, img.height * upscale), Image.Resampling.LANCZOS)
 
-                # draw text on transparent overlay
+                # create text overlay
                 text_layer = Image.new("RGBA", large.size, (0, 0, 0, 0))
                 draw = ImageDraw.Draw(text_layer)
                 font_path = os.path.join("fonts", s.font_family or "arial.ttf")
@@ -290,18 +292,23 @@ def send_slots(guild_id: str, body: SendSlotsBody):
                 x = (large.width - text_w) / 2
                 y = s.padding_top * upscale if s.padding_top else (large.height // 2 - text_h // 2)
 
-                # smooth glow for contrast
-                for dx in range(-3, 4):
-                    for dy in range(-3, 4):
-                        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 150))
+                # ✨ glow effect (bright outline)
+                glow_color = (0, 0, 255, 200)  # blueish glow to match DS theme
+                for radius in range(1, 6):
+                    temp_layer = text_layer.copy()
+                    temp_draw = ImageDraw.Draw(temp_layer)
+                    temp_draw.text((x, y), text, font=font, fill=glow_color)
+                    text_layer = Image.alpha_composite(text_layer, temp_layer.filter(ImageFilter.GaussianBlur(radius)))
+
+                # overlay text in bright white
+                draw = ImageDraw.Draw(text_layer)
                 draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
 
-                # merge and downscale back
                 combined = Image.alpha_composite(large, text_layer)
                 final = combined.resize(img.size, Image.Resampling.LANCZOS)
+
                 new_frames.append(final.convert("P", dither=Image.Dither.NONE, palette=Image.ADAPTIVE))
 
-            # Save as GIF but avoid excessive compression
             out_gif = io.BytesIO()
             imageio.mimsave(
                 out_gif,
@@ -310,11 +317,37 @@ def send_slots(guild_id: str, body: SendSlotsBody):
                 loop=0,
                 duration=duration,
                 palettesize=256,
-                subrectangles=False,  # disable subrects for consistent frame quality
-                quantizer="nq"  # use better quantization for color smoothness
+                subrectangles=False,
+                quantizer="nq"
             )
             out_gif.seek(0)
             files = {"file": ("slot.gif", out_gif, "image/gif")}
+
+        else:
+            # Static PNG fallback
+            img = Image.open(bg_bytes).convert("RGBA")
+            text_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
+            draw = ImageDraw.Draw(text_layer)
+            font_path = os.path.join("fonts", s.font_family or "arial.ttf")
+            font = ImageFont.truetype(font_path, s.font_size or 64)
+
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            x = (img.width - text_w) / 2
+            y = s.padding_top or (img.height // 2 - text_h // 2)
+
+            # glow shadow
+            for dx in range(-3, 4):
+                for dy in range(-3, 4):
+                    draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 100))
+            draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
+
+            img = Image.alpha_composite(img, text_layer)
+
+            out_img = io.BytesIO()
+            img.save(out_img, format="PNG")
+            out_img.seek(0)
+            files = {"file": ("slot.png", out_img, "image/png")}
 
         # upload to Discord
         upload = httpx.post(
@@ -323,12 +356,12 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             files=files
         )
 
-        # handle rate limits gracefully (must be inside the loop)
+        # handle rate limits gracefully
         if upload.status_code == 429:
             retry_after = upload.json().get("retry_after", 2)
             print(f"Rate-limited! Waiting {retry_after}s…")
             time.sleep(retry_after)
-            continue  # ✅ works because we're inside the for-loop
+            continue
 
         upload.raise_for_status()
 

@@ -6,12 +6,10 @@ import Dashboard from "./Dashboard";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<App />} />
-        <Route path="/dashboard/:guildId" element={<Dashboard />} />
-      </Routes>
-    </BrowserRouter>
-  </React.StrictMode>
+  <BrowserRouter>
+    <Routes>
+      <Route path="/" element={<App />} />
+      <Route path="/dashboard/:guildId" element={<Dashboard />} />
+    </Routes>
+  </BrowserRouter>
 );

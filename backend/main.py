@@ -247,7 +247,9 @@ def list_slots(guild_id: str):
     """
     Returns slots #2..#25 (initializes on first access).
     """
-    with get_db() as db:
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
         slots = (
             db.query(Slot)
             .filter(Slot.guild_id == guild_id)
@@ -264,13 +266,14 @@ def list_slots(guild_id: str):
                 .order_by(Slot.slot_number)
                 .all()
             )
+
         return [
             {
                 "slot_number": s.slot_number,
                 "teamname": s.teamname,
                 "teamtag": s.teamtag,
                 "emoji": s.emoji,
-                "background_url": s.background_url,  # we’ll repurpose this as gif name if you want
+                "background_url": s.background_url,  # repurposed for gif name
                 "is_gif": bool(s.is_gif),
                 "font_family": s.font_family,
                 "font_size": s.font_size,
@@ -280,7 +283,11 @@ def list_slots(guild_id: str):
             }
             for s in slots
         ]
+    finally:
+        db_gen.close()
 
+
+# --- Slot Update --------------------------------------------------------------
 class SlotUpdate(BaseModel):
     teamname: Optional[str] = None
     teamtag: Optional[str] = None
@@ -290,14 +297,17 @@ class SlotUpdate(BaseModel):
     font_color: Optional[str] = None
     padding_top: Optional[int] = None
     padding_bottom: Optional[int] = None
-    background_name: Optional[str] = None  # <- store a local gif/image filename if you want
+    background_name: Optional[str] = None  # <- store a local gif/image filename
+
 
 @app.post("/api/guilds/{guild_id}/slots/{slot_number}")
 def update_slot(guild_id: str, slot_number: int, payload: SlotUpdate):
     """
     Update a single slot’s properties.
     """
-    with get_db() as db:
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
         s = (
             db.query(Slot)
             .filter(Slot.guild_id == guild_id, Slot.slot_number == slot_number)
@@ -309,13 +319,16 @@ def update_slot(guild_id: str, slot_number: int, payload: SlotUpdate):
         # Update fields if provided
         for field, value in payload.model_dump(exclude_unset=True).items():
             if field == "background_name":
-                # save into background_url column to keep schema
+                # store gif/image filename in background_url column
                 setattr(s, "background_url", value)
             else:
                 setattr(s, field, value)
 
         db.commit()
         return {"ok": True}
+    finally:
+        db_gen.close()
+
 
 # --- Send Slots (high quality, local GIFs) ------------------------------------
 class SendSlotsBody(BaseModel):

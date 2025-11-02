@@ -99,6 +99,11 @@ def auth_login():
     }
     return RedirectResponse("https://discord.com/api/oauth2/authorize?" + urlencode(params))
 
+import uuid
+
+# Temporary in-memory session store (simple; use Redis or DB for persistence)
+SESSION_STORE = {}
+
 @app.get("/auth/callback")
 async def auth_callback(code: str):
     if not (DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET and OAUTH_REDIRECT_URI):
@@ -107,7 +112,7 @@ async def auth_callback(code: str):
     async with httpx.AsyncClient() as client:
         token_data = {
             "client_id": DISCORD_CLIENT_ID,
-            "client_secret": DISCORD_CLIENT_SECRET,
+            "client_secret": DISCORD_CLIENT_SECRET",
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": OAUTH_REDIRECT_URI,
@@ -124,24 +129,24 @@ async def auth_callback(code: str):
         r2.raise_for_status()
         guilds = r2.json()
 
-    # short-lived JWT that the frontend can decode
-    token = jwt.encode(
-        {"guilds": guilds, "exp": datetime.utcnow() + timedelta(minutes=5)},
-        SECRET_KEY,
-        algorithm="HS256",
-    )
+    # ✅ Store guilds server-side under a random session ID
+    session_id = str(uuid.uuid4())
+    SESSION_STORE[session_id] = {
+        "guilds": guilds,
+        "exp": datetime.utcnow() + timedelta(minutes=5)
+    }
 
-    return RedirectResponse(f"{FRONTEND_URL}/?token={token}")
+    frontend_url = os.getenv("FRONTEND_URL", "https://slotmanager-frontend.onrender.com")
+    return RedirectResponse(f"{frontend_url}/?session={session_id}")
 
 @app.get("/api/decode")
-def decode_token(token: str):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        return {"guilds": payload["guilds"]}
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+def decode_session(session: str):
+    data = SESSION_STORE.get(session)
+    if not data:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if data["exp"] < datetime.utcnow():
+        raise HTTPException(status_code=401, detail="Session expired")
+    return {"guilds": data["guilds"]}
 
 # -----------------------------
 # Slots

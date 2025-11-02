@@ -4,7 +4,7 @@ export default function App() {
   const [guilds, setGuilds] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Read environment variables
+  // Environment variables (fallback to defaults if not set)
   const API_URL = import.meta.env.VITE_API_URL || "https://slotmanager-backend.onrender.com";
   const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID || "1432457167306227885";
   const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || `${API_URL}/auth/callback`;
@@ -12,16 +12,19 @@ export default function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
+    const session = params.get("session"); // ✅ replaced token with session
 
-    if (!token) {
+    if (!session) {
       setLoading(false);
       return;
     }
 
-    // Decode token to get guilds
-    fetch(`${API_URL}/api/decode?token=${token}`)
-      .then((res) => res.json())
+    // ✅ Fetch guilds via session ID
+    fetch(`${API_URL}/api/decode?session=${session}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to decode session");
+        return res.json();
+      })
       .then((data) => {
         if (data.guilds) setGuilds(data.guilds);
       })
@@ -30,7 +33,6 @@ export default function App() {
   }, []);
 
   const handleLogin = () => {
-    // Build Discord OAuth2 link dynamically
     const params = new URLSearchParams({
       client_id: CLIENT_ID,
       redirect_uri: REDIRECT_URI,

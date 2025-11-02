@@ -5,19 +5,31 @@ export default function Dashboard() {
   const { guild_id } = useParams();
   const [slots, setSlots] = useState([]);
   const [backgroundUrl, setBackgroundUrl] = useState("");
-  const [channelId, setChannelId] = useState("");
+  const [channels, setChannels] = useState([]);
+  const [selectedChannel, setSelectedChannel] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Fetch slots and background
   useEffect(() => {
     fetch(`https://slotmanager-backend.onrender.com/api/guilds/${guild_id}/slots`)
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         setSlots(data);
         if (data.length > 0 && data[0].background_url) {
           setBackgroundUrl(data[0].background_url);
         }
       })
-      .catch(err => console.error("Error loading slots:", err));
+      .catch((err) => console.error("Error loading slots:", err));
+  }, [guild_id]);
+
+  // Fetch Discord channels
+  useEffect(() => {
+    fetch(`https://slotmanager-backend.onrender.com/api/guilds/${guild_id}/channels`)
+      .then((res) => res.json())
+      .then((data) => {
+        setChannels(data.channels);
+      })
+      .catch((err) => console.error("Failed to load channels:", err));
   }, [guild_id]);
 
   const updateSlot = (index, key, value) => {
@@ -27,6 +39,11 @@ export default function Dashboard() {
   };
 
   const saveSlot = async (slot) => {
+    if (!selectedChannel) {
+      alert("Please select a Discord channel first!");
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await fetch(
@@ -39,7 +56,7 @@ export default function Dashboard() {
             teamtag: slot.teamtag,
             emoji: slot.emoji,
             background_url: backgroundUrl,
-            channel_id: channelId,
+            channel_id: selectedChannel,
           }),
         }
       );
@@ -53,6 +70,11 @@ export default function Dashboard() {
   };
 
   const saveAll = async () => {
+    if (!selectedChannel) {
+      alert("Please select a Discord channel first!");
+      return;
+    }
+
     for (const slot of slots) {
       await saveSlot(slot);
     }
@@ -66,18 +88,31 @@ export default function Dashboard() {
 
       <div className="mb-8 bg-gray-800 p-4 rounded-lg">
         <h2 className="text-xl font-semibold mb-2">Global Settings</h2>
+
+        {/* Background URL input */}
         <input
           className="w-full bg-gray-700 p-2 rounded mb-3"
           placeholder="Background GIF URL"
           value={backgroundUrl}
           onChange={(e) => setBackgroundUrl(e.target.value)}
         />
-        <input
-          className="w-full bg-gray-700 p-2 rounded"
-          placeholder="Discord Channel ID to send slots"
-          value={channelId}
-          onChange={(e) => setChannelId(e.target.value)}
-        />
+
+        {/* Channel Dropdown */}
+        <div className="mb-3">
+          <label className="block mb-2 font-semibold">Select Discord Channel:</label>
+          <select
+            value={selectedChannel}
+            onChange={(e) => setSelectedChannel(e.target.value)}
+            className="bg-gray-700 p-2 rounded w-full"
+          >
+            <option value="">-- Choose a channel --</option>
+            {channels.map((ch) => (
+              <option key={ch.id} value={ch.id}>
+                #{ch.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <h2 className="text-xl mb-4 font-semibold">Slots</h2>
@@ -107,6 +142,7 @@ export default function Dashboard() {
               onChange={(e) => updateSlot(index, "teamtag", e.target.value)}
             />
 
+            {/* Emoji dropdown (Yes / No) */}
             <select
               className="w-full bg-gray-700 rounded p-2 mb-2"
               value={slot.emoji || ""}

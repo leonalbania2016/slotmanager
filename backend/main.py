@@ -228,6 +228,26 @@ def update_slot(guild_id: str, slot_number: int, data: dict = Body(...)):
         db.commit()
 
     return {"status": "ok", "slot_number": slot_number}
+@app.post("/api/guilds/{guild_id}/send_slots")
+def send_slots(guild_id: str, data: dict = Body(...)):
+    channel_id = data.get("channel_id")
+    if not channel_id:
+        raise HTTPException(status_code=400, detail="channel_id missing")
+
+    with get_db() as db:
+        slots = db.query(Slot).filter(Slot.guild_id == guild_id).order_by(Slot.slot_number).all()
+
+    content = "\n".join(
+        f"#{s.slot_number} {s.teamname or 'Unassigned'} ({s.teamtag or ''})"
+        for s in slots
+    )
+
+    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
+    payload = {"content": f"**Slot List for {guild_id}:**\n{content}"}
+
+    httpx.post(f"https://discord.com/api/v10/channels/{channel_id}/messages", json=payload, headers=headers)
+
+    return {"status": "ok"}
 
 @app.post("/api/guilds/{guild_id}/slots/{slot_number}/upload")
 async def upload_background(guild_id: str, slot_number: int, file: UploadFile = File(...)):

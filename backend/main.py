@@ -241,8 +241,6 @@ def send_slots(guild_id: str, body: SendSlotsBody):
     if not slots:
         raise HTTPException(status_code=404, detail="No slots found for this guild")
 
-    DEFAULT_BACKGROUND_URL = "https://cdn.discordapp.com/attachments/xxxx/slot_bg.gif"
-
     for s in slots:
         bg_url = s.background_url or DEFAULT_BACKGROUND_URL
         teamname = s.teamname or "Unassigned"

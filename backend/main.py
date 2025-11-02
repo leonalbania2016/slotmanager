@@ -341,36 +341,45 @@ def send_slots(guild_id: str, body: SendSlotsBody):
     Sends each slot as an image (or animated GIF) to a Discord channel.
     Uses local files from backend/assets/gifs/.
     """
+    import io, os, time
+    import httpx
+    from PIL import Image
+
     if not DISCORD_BOT_TOKEN:
         raise HTTPException(status_code=500, detail="DISCORD_BOT_TOKEN not configured")
 
     channel_id = body.channel_id
     chosen_gif = body.gif_name or DEFAULT_GIF_NAME
     gif_path = os.path.join(GIFS_DIR, chosen_gif)
+
+    # ✅ Validate the background file exists locally
     if not os.path.isfile(gif_path):
-        # If the chosen file is not found, try default; otherwise error
         fallback = os.path.join(GIFS_DIR, DEFAULT_GIF_NAME)
         if os.path.isfile(fallback):
             gif_path = fallback
         else:
             raise HTTPException(status_code=404, detail=f"Background file not found: {chosen_gif}")
 
-    with get_db() as db:
+    # ✅ FIX: Properly handle get_db() (no 'with' statement)
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
         slots = (
             db.query(Slot)
             .filter(Slot.guild_id == guild_id)
             .order_by(Slot.slot_number)
             .all()
         )
+    finally:
+        db_gen.close()
 
     if not slots:
         raise HTTPException(status_code=404, detail="No slots found for this guild")
 
     headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
-
-    # Determine if the background is animated by extension
     is_gif = gif_path.lower().endswith(".gif")
 
+    # 🔁 Generate and send each slot image/GIF
     for s in slots:
         teamname = s.teamname or "Unassigned"
         tag = f" ({s.teamtag})" if s.teamtag else ""
@@ -393,10 +402,12 @@ def send_slots(guild_id: str, body: SendSlotsBody):
                 frames.append(rendered)
                 durations.append(dur)
 
-            # Save to memory
+            # Save in-memory GIF
             out_gif = io.BytesIO()
-            # Convert to palette mode with adaptive palette (reduces banding)
-            pal_frames = [f.convert("P", palette=Image.ADAPTIVE, dither=Image.Dither.NONE) for f in frames]
+            pal_frames = [
+                f.convert("P", palette=Image.ADAPTIVE, dither=Image.Dither.NONE)
+                for f in frames
+            ]
             pal_frames[0].save(
                 out_gif,
                 format="GIF",
@@ -409,16 +420,19 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             )
             out_gif.seek(0)
             files = {"file": ("slot.gif", out_gif, "image/gif")}
+
         else:
-            # Static image path (png/jpg/webp) – draw once
+            # Static image – draw once
             base = Image.open(gif_path).convert("RGBA")
-            final = _draw_text_with_glow(base, text, font_family, font_size, font_color, y_pos)
+            final = _draw_text_with_glow(
+                base, text, font_family, font_size, font_color, y_pos
+            )
             out_img = io.BytesIO()
             final.save(out_img, format="PNG")
             out_img.seek(0)
             files = {"file": ("slot.png", out_img, "image/png")}
 
-        # Upload to Discord
+        # 🚀 Upload to Discord
         upload = httpx.post(
             f"https://discord.com/api/v10/channels/{channel_id}/messages",
             headers=headers,
@@ -429,6 +443,7 @@ def send_slots(guild_id: str, body: SendSlotsBody):
         if upload.status_code == 429:
             # Respect rate limit and retry once
             retry_after = upload.json().get("retry_after", 2)
+            print(f"Rate-limited by Discord. Retrying in {retry_after}s...")
             time.sleep(float(retry_after) + 0.5)
             upload = httpx.post(
                 f"https://discord.com/api/v10/channels/{channel_id}/messages",
@@ -438,8 +453,7 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             )
 
         upload.raise_for_status()
-        # Friendly pacing to avoid global rate limits (5 msgs/sec per bot)
-        time.sleep(1.0)
+        time.sleep(1.0)  # Discord global rate limit: 5 messages/sec
 
     return {"status": "sent"}
 

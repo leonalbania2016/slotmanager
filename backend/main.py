@@ -110,6 +110,7 @@ async def auth_callback(code: str):
         raise HTTPException(status_code=500, detail="OAuth not configured")
 
     async with httpx.AsyncClient() as client:
+        # Step 1: Exchange code for access token
         token_data = {
             "client_id": DISCORD_CLIENT_ID,
             "client_secret": DISCORD_CLIENT_SECRET,
@@ -118,18 +119,31 @@ async def auth_callback(code: str):
             "redirect_uri": OAUTH_REDIRECT_URI,
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        r = await client.post("https://discord.com/api/oauth2/token", data=token_data, headers=headers)
-        r.raise_for_status()
-        access_token = r.json()["access_token"]
+        token_res = await client.post(
+            "https://discord.com/api/oauth2/token", data=token_data, headers=headers
+        )
+        token_res.raise_for_status()
+        access_token = token_res.json()["access_token"]
 
+        # Step 2: Get user's guilds
         r2 = await client.get(
             "https://discord.com/api/users/@me/guilds",
             headers={"Authorization": f"Bearer {access_token}"},
         )
         r2.raise_for_status()
-        guilds = r2.json()
+        all_guilds = r2.json()
 
-    # ✅ Store guilds server-side under a random session ID
+        # ✅ Step 3: Filter only guilds where user has ADMIN permission
+        guilds = []
+        for g in all_guilds:
+            try:
+                perms = int(g.get("permissions", 0))
+                if (perms & 0x8) == 0x8:  # 0x8 = ADMIN
+                    guilds.append(g)
+            except (ValueError, TypeError):
+                continue
+
+    # Step 4: Store filtered guilds in session
     session_id = str(uuid.uuid4())
     SESSION_STORE[session_id] = {
         "guilds": guilds,
@@ -138,6 +152,7 @@ async def auth_callback(code: str):
 
     frontend_url = os.getenv("FRONTEND_URL", "https://slotmanager-frontend.onrender.com")
     return RedirectResponse(f"{frontend_url}/?session={session_id}")
+
 
 @app.get("/api/decode")
 def decode_session(session: str):

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from "react-router-dom";
+import { Routes, Route, useNavigate, useParams } from "react-router-dom";
 import Dashboard from "./Dashboard";
 
 function Home() {
@@ -101,11 +101,9 @@ function Home() {
 
 export default function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/dashboard/:guild_id" element={<Dashboard />} />
-      </Routes>
-    </Router>
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/dashboard/:guild_id" element={<Dashboard />} />
+    </Routes>
   );
 }

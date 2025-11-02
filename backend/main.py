@@ -227,8 +227,14 @@ import imageio
 from PIL import Image, ImageDraw, ImageFont
 import io
 
+from pydantic import BaseModel
+
+class SendSlotsBody(BaseModel):
+    channel_id: str
+
 @app.post("/api/guilds/{guild_id}/send_slots")
-def send_slots(guild_id: str, channel_id: str = Body(...)):
+def send_slots(guild_id: str, body: SendSlotsBody):
+    channel_id = body.channel_id
     """
     Sends the slot list as images to a Discord channel.
     Keeps GIF animation if the background is animated.

@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
+import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from "react-router-dom";
+import Dashboard from "./Dashboard";
 
-export default function App() {
+function Home() {
   const [guilds, setGuilds] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Backend & OAuth config
   const API_URL = import.meta.env.VITE_API_URL || "https://slotmanager-backend.onrender.com";
   const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID || "1432457167306227885";
   const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || `${API_URL}/auth/callback`;
-  const FRONTEND_URL = import.meta.env.VITE_FRONTEND_URL || "https://slotmanager-frontend.onrender.com";
 
-  // Load session and guilds
+  const navigate = useNavigate();
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const session = params.get("session");
@@ -32,7 +33,6 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Redirect to Discord login
   const handleLogin = () => {
     const params = new URLSearchParams({
       client_id: CLIENT_ID,
@@ -43,10 +43,9 @@ export default function App() {
     window.location.href = `https://discord.com/oauth2/authorize?${params.toString()}`;
   };
 
-  // Go to dashboard
   const handleSelectGuild = (guildId) => {
-    // ✅ Use relative path (React Router) instead of full URL
-    window.location.href = `/dashboard/${guildId}`;
+    // ✅ Use React Router navigation instead of manual redirect
+    navigate(`/dashboard/${guildId}`);
   };
 
   if (loading) {
@@ -97,5 +96,16 @@ export default function App() {
         ))}
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/dashboard/:guild_id" element={<Dashboard />} />
+      </Routes>
+    </Router>
   );
 }

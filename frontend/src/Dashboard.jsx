@@ -6,6 +6,8 @@ export default function Dashboard() {
   const [slots, setSlots] = useState([]);
   const [backgroundUrl, setBackgroundUrl] = useState("");
   const [channels, setChannels] = useState([]);
+  const [gifs, setGifs] = useState([]); // new: available gif list
+  const [selectedGif, setSelectedGif] = useState(""); // new: chosen gif
   const [selectedChannel, setSelectedChannel] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -13,40 +15,48 @@ export default function Dashboard() {
 
   console.log("Dashboard loaded for guild:", guild_id);
 
- // Fetch slots for this guild
-useEffect(() => {
-  if (!guild_id) return;
-  fetch(`${API_URL}/api/guilds/${guild_id}/slots`)
-    .then((res) => res.json())
-    .then((data) => {
-      setSlots(data);
-      if (data.length > 0 && data[0].background_url) {
-        setBackgroundUrl(data[0].background_url);
-      }
-    })
-    .catch((err) => console.error("Error loading slots:", err));
-}, [guild_id]);
+  // Fetch slots for this guild
+  useEffect(() => {
+    if (!guild_id) return;
+    fetch(`${API_URL}/api/guilds/${guild_id}/slots`)
+      .then((res) => res.json())
+      .then((data) => {
+        setSlots(data);
+        if (data.length > 0 && data[0].background_url) {
+          setBackgroundUrl(data[0].background_url);
+        }
+      })
+      .catch((err) => console.error("Error loading slots:", err));
+  }, [guild_id]);
 
-// Fetch all channels for this guild
-useEffect(() => {
-  if (!guild_id) return;
-  fetch(`${API_URL}/api/guilds/${guild_id}/channels`)
-    .then((res) => res.json())
-    .then((data) => {
-      console.log("Fetched channels:", data); // 👈 logs what backend returns
-      if (Array.isArray(data)) {
-        // backend returns a plain list like [{id, name}, ...]
-        setChannels(data);
-      } else if (data.channels && Array.isArray(data.channels)) {
-        // or if it’s wrapped like { channels: [...] }
-        setChannels(data.channels);
-      } else {
-        console.warn("Unexpected channels response:", data);
-      }
-    })
-    .catch((err) => console.error("Failed to load channels:", err));
-}, [guild_id]);
+  // Fetch all channels for this guild
+  useEffect(() => {
+    if (!guild_id) return;
+    fetch(`${API_URL}/api/guilds/${guild_id}/channels`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setChannels(data);
+        } else if (data.channels && Array.isArray(data.channels)) {
+          setChannels(data.channels);
+        } else {
+          console.warn("Unexpected channels response:", data);
+        }
+      })
+      .catch((err) => console.error("Failed to load channels:", err));
+  }, [guild_id]);
 
+  // 🔹 Fetch available local GIFs from backend
+  useEffect(() => {
+    fetch(`${API_URL}/api/gifs`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.gifs)) {
+          setGifs(data.gifs);
+        }
+      })
+      .catch((err) => console.error("Error loading GIFs:", err));
+  }, []);
 
   // Update slot values locally
   const updateSlot = (index, key, value) => {
@@ -102,6 +112,42 @@ useEffect(() => {
     alert("✅ All slots saved successfully!");
   };
 
+  // 🔹 Send slots to Discord with chosen GIF
+  const sendSlots = async () => {
+    if (!selectedChannel) {
+      alert("⚠️ Please select a Discord channel first!");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/api/guilds/${guild_id}/send_slots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel_id: selectedChannel,
+          gif_name: selectedGif || "default.gif",
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Backend error:", errorText);
+        alert("❌ Failed to send slots — check backend logs.");
+        return;
+      }
+
+      const data = await res.json();
+      if (data.status === "sent" || data.status === "success") {
+        alert("✅ Slots sent successfully!");
+      } else {
+        alert("❌ Failed to send slots.");
+      }
+    } catch (err) {
+      console.error("Failed to send slots:", err);
+      alert("❌ Network error while sending slots.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
@@ -110,13 +156,22 @@ useEffect(() => {
       <div className="mb-8 bg-gray-800 p-4 rounded-lg">
         <h2 className="text-xl font-semibold mb-2">Global Settings</h2>
 
-        {/* Background URL (applies to all slots) */}
-        <input
-          className="w-full bg-gray-700 p-2 rounded mb-3"
-          placeholder="Background GIF URL (applies to all slots)"
-          value={backgroundUrl}
-          onChange={(e) => setBackgroundUrl(e.target.value)}
-        />
+        {/* GIF Selector */}
+        <div className="mb-4">
+          <label className="block mb-2 font-semibold">Select Background GIF:</label>
+          <select
+            value={selectedGif}
+            onChange={(e) => setSelectedGif(e.target.value)}
+            className="bg-gray-700 p-2 rounded w-full"
+          >
+            <option value="">-- Choose a GIF (default if empty) --</option>
+            {gifs.map((gif) => (
+              <option key={gif} value={gif}>
+                {gif}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {/* Channel Dropdown */}
         <div className="mb-3">
@@ -135,43 +190,14 @@ useEffect(() => {
               </option>
             ))}
           </select>
-<button
-  onClick={async () => {
-    if (!selectedChannel) {
-      alert("⚠️ Please select a Discord channel first!");
-      return;
-    }
 
-    try {
-      const res = await fetch(`${API_URL}/api/guilds/${guild_id}/send_slots`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_id: selectedChannel }),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Backend error:", errorText);
-        alert("❌ Failed to send slots — check backend logs for details.");
-        return;
-      }
-
-      const data = await res.json();
-      if (data.status === "success" || data.status === "sent") {
-        alert("✅ Slots sent successfully!");
-      } else {
-        alert("❌ Failed to send slots.");
-      }
-    } catch (err) {
-      console.error("Failed to send slots:", err);
-      alert("❌ Network error while sending slots.");
-    }
-  }}
-  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-2 transition"
->
-  📤 Send Slots to Discord
-</button>
-
+          {/* Send Slots */}
+          <button
+            onClick={sendSlots}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-3 transition"
+          >
+            📤 Send Slots to Discord
+          </button>
         </div>
       </div>
 

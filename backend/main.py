@@ -1,123 +1,162 @@
 import os
 import io
-import secrets
+import time
+import uuid
+import json
+from datetime import datetime, timedelta
+from typing import Optional, List
+
 import httpx
 import numpy as np
-import imageio
-from PIL import Image, ImageDraw, ImageFont
-from fastapi import Body
-from datetime import datetime, timedelta
-from contextlib import contextmanager
-from urllib.parse import urlencode
-import time
-import jwt
-import httpx
-import cloudinary
-import cloudinary.uploader
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body, Depends
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-from models import SessionLocal, Base, engine, Slot, GuildConfig
-from utils import fetch_image_bytes, generate_from_url_bytes, draw_slot_on_image
+# --- Your DB bits -------------------------------------------------------------
+# Assumes you already have models.py with Slot + get_db
+# If your get_db import path is different, adjust this import.
+from models import Slot, get_db
 
-# -----------------------------
-# DB init
-# -----------------------------
-Base.metadata.create_all(bind=engine)
-
-@contextmanager
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# -----------------------------
-# Config
-# -----------------------------
-DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
-DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-# Default background for slot banners (if none set per slot)
-DEFAULT_BACKGROUND_URL = "https://cdn.discordapp.com/attachments/1427732546036174951/1432503283498487845/EVERYTHIN3-ezgif.com-video-to-gif-converter.gif?ex=69088a65&is=690738e5&hm=cee311e01ffe66fcd0a7c4023140805f1541f4f3d14e5ef4f0b621141c13c287&"  # ← replace with your default image link
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", f"{BACKEND_URL}/auth/callback")
+# --- Env & Config -------------------------------------------------------------
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
+OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://slotmanager-frontend.onrender.com")
-SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
 
-# -----------------------------
-# Cloudinary
-# -----------------------------
-CLOUDINARY_URL = os.getenv("CLOUDINARY_URL", "")
-if CLOUDINARY_URL:
-    os.environ["CLOUDINARY_URL"] = CLOUDINARY_URL  # ensure SDK sees it
-    cloudinary.config(secure=True)
-else:
-    cloudinary.config(
-        cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-        api_key=os.getenv("CLOUDINARY_API_KEY"),
-        api_secret=os.getenv("CLOUDINARY_API_SECRET"),
-        secure=True,
-    )
+# Where your local GIFs live
+GIFS_DIR = os.path.join(os.path.dirname(__file__), "assets", "gifs")
+DEFAULT_GIF_NAME = "default.gif"  # make sure this exists in GIFS_DIR
 
-# -----------------------------
-# FastAPI
-# -----------------------------
-app = FastAPI()
+# --- App init ----------------------------------------------------------------
+app = FastAPI(title="Slot Manager API")
 
-# ✅ CORS settings
-from fastapi.middleware.cors import CORSMiddleware
-
-origins = [
-    "https://slotmanager-frontend.onrender.com",  # your deployed frontend
-    "http://localhost:5173",  # for local development
-]
-
+# CORS for your frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[FRONTEND_URL, "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -----------------------------
-# Schemas
-# -----------------------------
-class SlotUpdate(BaseModel):
-    slot_number: int
-    teamname: str = ""
-    teamtag: str = ""
-    emoji: str = ""
-    font_family: str = "DejaVuSans.ttf"
-    font_size: int = 48
-    font_color: str = "#FFFFFF"
-    is_gif: int = 0
-    padding_top: int = 0
-    padding_bottom: int = 0
+# Serve static gifs (so frontend can preview if desired)
+if not os.path.isdir(GIFS_DIR):
+    os.makedirs(GIFS_DIR, exist_ok=True)
 
-# -----------------------------
-# Auth
-# -----------------------------
+# Optionally mount a static route (preview URLs like /static/gifs/filename.gif)
+app.mount("/static/gifs", StaticFiles(directory=GIFS_DIR), name="gifs")
+
+# --- Simple in-memory session store ------------------------------------------
+SESSION_STORE = {}  # session_id -> { "guilds": [...], "exp": datetime }
+
+# --- Helpers -----------------------------------------------------------------
+def _clean_expired_sessions():
+    now = datetime.utcnow()
+    expired = [k for k, v in SESSION_STORE.items() if v.get("exp") and v["exp"] < now]
+    for k in expired:
+        SESSION_STORE.pop(k, None)
+
+def _get_font(ttf_name: Optional[str], size: int) -> ImageFont.FreeTypeFont:
+    """
+    Try to load a TrueType font from ./fonts or system; fall back to default bitmap.
+    """
+    fonts_dir = os.path.join(os.path.dirname(__file__), "fonts")
+    ttf = ttf_name or "arial.ttf"
+    # Try local fonts dir first
+    try_paths = [
+        os.path.join(fonts_dir, ttf),
+        ttf,  # allow absolute or system path if someone puts a full path in DB
+    ]
+    for p in try_paths:
+        try:
+            return ImageFont.truetype(p, size=size)
+        except Exception:
+            pass
+    # Fallback (bitmap)
+    return ImageFont.load_default()
+
+def _draw_text_with_glow(
+    base_img: Image.Image,
+    text: str,
+    font_family: Optional[str],
+    font_size: int,
+    font_color: str,
+    y: Optional[int]
+) -> Image.Image:
+    """
+    Render crisp text by upscaling, drawing, then downscaling (super-sampling).
+    Adds a soft glow/outline for readability on busy backgrounds.
+    """
+    upscale = 2  # 2x supersampling keeps size good while sharpening text
+    W, H = base_img.size
+    large = base_img.resize((W * upscale, H * upscale), Image.Resampling.LANCZOS)
+
+    text_layer = Image.new("RGBA", large.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(text_layer)
+
+    font = _get_font(font_family, (font_size or 64) * upscale)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    x = (large.width - tw) // 2
+    y_px = y * upscale if y is not None else (large.height - th) // 2
+
+    # soft shadow/glow
+    shadow = Image.new("RGBA", large.size, (0, 0, 0, 0))
+    sdraw = ImageDraw.Draw(shadow)
+    sdraw.text((x, y_px), text, font=font, fill=(0, 0, 0, 255))
+    for radius in (3, 2, 1):
+        shadow = shadow.filter(ImageFilter.GaussianBlur(radius=radius))
+    text_layer = Image.alpha_composite(text_layer, shadow)
+
+    # foreground text
+    draw = ImageDraw.Draw(text_layer)
+    # support hex like "#FFFFFF" or names like "white"
+    try:
+        fill_color = font_color if font_color else "#FFFFFF"
+    except Exception:
+        fill_color = "#FFFFFF"
+    draw.text((x, y_px), text, font=font, fill=fill_color)
+
+    combined = Image.alpha_composite(large.convert("RGBA"), text_layer)
+    final = combined.resize((W, H), Image.Resampling.LANCZOS)
+    return final
+
+def _iter_gif_frames(path: str):
+    """
+    Generator yielding (frame_image: PIL.Image, duration_seconds: float).
+    Uses imageio reader so we honor frame durations.
+    """
+    import imageio.v2 as imageio
+    reader = imageio.get_reader(path, format="GIF")
+    # Default per-frame duration (imageio can give a single duration or per-frame list)
+    meta = reader.get_meta_data()
+    default_ms = meta.get("duration", 80)
+    for i, frame in enumerate(reader):
+        # Some GIFs have per-frame durations in 'meta["duration"]' (single) or something else.
+        # imageio v2 doesn’t always expose per-frame durations; we’ll use default if none.
+        dur = default_ms / 1000.0
+        yield Image.fromarray(frame).convert("RGBA"), dur
+    reader.close()
+
+# --- OAuth (login → callback) ------------------------------------------------
 @app.get("/auth/login")
 def auth_login():
-    if not DISCORD_CLIENT_ID or not OAUTH_REDIRECT_URI:
+    if not (DISCORD_CLIENT_ID and OAUTH_REDIRECT_URI):
         raise HTTPException(status_code=500, detail="OAuth not configured")
     params = {
         "client_id": DISCORD_CLIENT_ID,
         "redirect_uri": OAUTH_REDIRECT_URI,
         "response_type": "code",
         "scope": "identify guilds",
+        "prompt": "consent",
     }
-    return RedirectResponse("https://discord.com/api/oauth2/authorize?" + urlencode(params))
-
-import uuid
-
-# Temporary in-memory session store (simple; use Redis or DB for persistence)
-SESSION_STORE = {}
+    q = "&".join([f"{k}={httpx.QueryParams({k: v})[k]}" for k, v in params.items()])
+    return RedirectResponse(f"https://discord.com/api/oauth2/authorize?{q}")
 
 @app.get("/auth/callback")
 async def auth_callback(code: str):
@@ -125,7 +164,7 @@ async def auth_callback(code: str):
         raise HTTPException(status_code=500, detail="OAuth not configured")
 
     async with httpx.AsyncClient() as client:
-        # Step 1: Exchange code for access token
+        # Exchange code for token
         token_data = {
             "client_id": DISCORD_CLIENT_ID,
             "client_secret": DISCORD_CLIENT_SECRET,
@@ -134,13 +173,11 @@ async def auth_callback(code: str):
             "redirect_uri": OAUTH_REDIRECT_URI,
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        token_res = await client.post(
-            "https://discord.com/api/oauth2/token", data=token_data, headers=headers
-        )
-        token_res.raise_for_status()
-        access_token = token_res.json()["access_token"]
+        r = await client.post("https://discord.com/api/oauth2/token", data=token_data, headers=headers)
+        r.raise_for_status()
+        access_token = r.json()["access_token"]
 
-        # Step 2: Get user's guilds
+        # Get the user's guilds
         r2 = await client.get(
             "https://discord.com/api/users/@me/guilds",
             headers={"Authorization": f"Bearer {access_token}"},
@@ -148,41 +185,68 @@ async def auth_callback(code: str):
         r2.raise_for_status()
         all_guilds = r2.json()
 
-        # ✅ Step 3: Filter only guilds where user has ADMIN permission
-        guilds = []
-        for g in all_guilds:
-            try:
-                perms = int(g.get("permissions", 0))
-                if (perms & 0x8) == 0x8:  # 0x8 = ADMIN
-                    guilds.append(g)
-            except (ValueError, TypeError):
-                continue
+    # Filter only guilds where user has ADMINISTRATOR permission (0x8)
+    guilds = [g for g in all_guilds if (g.get("permissions", 0) & 0x8) == 0x8]
 
-    # Step 4: Store filtered guilds in session
+    # Create short-lived session
     session_id = str(uuid.uuid4())
     SESSION_STORE[session_id] = {
         "guilds": guilds,
         "exp": datetime.utcnow() + timedelta(minutes=5)
     }
 
-    frontend_url = os.getenv("FRONTEND_URL", "https://slotmanager-frontend.onrender.com")
-    return RedirectResponse(f"{frontend_url}/?session={session_id}")
-
+    return RedirectResponse(f"{FRONTEND_URL}/?session={session_id}")
 
 @app.get("/api/decode")
 def decode_session(session: str):
+    _clean_expired_sessions()
     data = SESSION_STORE.get(session)
     if not data:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if data["exp"] < datetime.utcnow():
-        raise HTTPException(status_code=401, detail="Session expired")
-    return {"guilds": data["guilds"]}
+        raise HTTPException(status_code=404, detail="Session not found or expired")
 
-# -----------------------------
-# Slots
-# -----------------------------
+    # Return only what frontend needs
+    guilds = [
+        {"id": g["id"], "name": g["name"], "icon": g.get("icon")}
+        for g in data["guilds"]
+    ]
+    return {"guilds": guilds}
+
+# --- GIFs listing for frontend -----------------------------------------------
+@app.get("/api/gifs")
+def list_gifs():
+    """
+    Returns available gif filenames in backend/assets/gifs
+    """
+    try:
+        files = sorted(
+            [f for f in os.listdir(GIFS_DIR) if f.lower().endswith((".gif", ".png", ".jpg", ".jpeg", ".webp"))]
+        )
+        return {"gifs": files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Channels (bot token) -----------------------------------------------------
+@app.get("/api/guilds/{guild_id}/channels")
+def get_guild_channels(guild_id: str):
+    """
+    Fetch all text channels for a guild using bot token.
+    """
+    if not DISCORD_BOT_TOKEN:
+        raise HTTPException(status_code=500, detail="DISCORD_BOT_TOKEN not configured")
+
+    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
+    r = httpx.get(f"https://discord.com/api/v10/guilds/{guild_id}/channels", headers=headers)
+    r.raise_for_status()
+    channels = r.json()
+    text_channels = [{"id": ch["id"], "name": ch["name"]} for ch in channels if ch.get("type") == 0]
+    return text_channels  # plain array is fine (your frontend supports both)
+
+# --- Slots --------------------------------------------------------------------
 @app.get("/api/guilds/{guild_id}/slots")
 def list_slots(guild_id: str):
+    """
+    Returns slots #2..#25 (initializes on first access).
+    """
     with get_db() as db:
         slots = (
             db.query(Slot)
@@ -191,7 +255,6 @@ def list_slots(guild_id: str):
             .all()
         )
         if not slots:
-            # initialize slots 2..25 on first access
             for s in range(2, 26):
                 db.add(Slot(guild_id=guild_id, slot_number=s))
             db.commit()
@@ -201,14 +264,13 @@ def list_slots(guild_id: str):
                 .order_by(Slot.slot_number)
                 .all()
             )
-
         return [
             {
                 "slot_number": s.slot_number,
                 "teamname": s.teamname,
                 "teamtag": s.teamtag,
                 "emoji": s.emoji,
-                "background_url": s.background_url,
+                "background_url": s.background_url,  # we’ll repurpose this as gif name if you want
                 "is_gif": bool(s.is_gif),
                 "font_family": s.font_family,
                 "font_size": s.font_size,
@@ -218,335 +280,157 @@ def list_slots(guild_id: str):
             }
             for s in slots
         ]
-from fastapi import Body, HTTPException
-from pydantic import BaseModel
-from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
-import httpx, io, os, time, imageio, numpy as np
 
+class SlotUpdate(BaseModel):
+    teamname: Optional[str] = None
+    teamtag: Optional[str] = None
+    emoji: Optional[str] = None
+    font_family: Optional[str] = None
+    font_size: Optional[int] = None
+    font_color: Optional[str] = None
+    padding_top: Optional[int] = None
+    padding_bottom: Optional[int] = None
+    background_name: Optional[str] = None  # <- store a local gif/image filename if you want
+
+@app.post("/api/guilds/{guild_id}/slots/{slot_number}")
+def update_slot(guild_id: str, slot_number: int, payload: SlotUpdate):
+    """
+    Update a single slot’s properties.
+    """
+    with get_db() as db:
+        s = (
+            db.query(Slot)
+            .filter(Slot.guild_id == guild_id, Slot.slot_number == slot_number)
+            .first()
+        )
+        if not s:
+            raise HTTPException(status_code=404, detail="Slot not found")
+
+        # Update fields if provided
+        for field, value in payload.model_dump(exclude_unset=True).items():
+            if field == "background_name":
+                # save into background_url column to keep schema
+                setattr(s, "background_url", value)
+            else:
+                setattr(s, field, value)
+
+        db.commit()
+        return {"ok": True}
+
+# --- Send Slots (high quality, local GIFs) ------------------------------------
 class SendSlotsBody(BaseModel):
     channel_id: str
+    gif_name: Optional[str] = None  # optional: choose a GIF from /api/gifs (fallback to default.gif)
 
 @app.post("/api/guilds/{guild_id}/send_slots")
 def send_slots(guild_id: str, body: SendSlotsBody):
     """
     Sends each slot as an image (or animated GIF) to a Discord channel.
-    High-quality rendering with smooth text overlay and shadow glow.
+    Uses local files from backend/assets/gifs/.
     """
-    import numpy as np
-    import time
-    import os
-    from PIL import ImageFilter
+    if not DISCORD_BOT_TOKEN:
+        raise HTTPException(status_code=500, detail="DISCORD_BOT_TOKEN not configured")
 
     channel_id = body.channel_id
-    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
+    chosen_gif = body.gif_name or DEFAULT_GIF_NAME
+    gif_path = os.path.join(GIFS_DIR, chosen_gif)
+    if not os.path.isfile(gif_path):
+        # If the chosen file is not found, try default; otherwise error
+        fallback = os.path.join(GIFS_DIR, DEFAULT_GIF_NAME)
+        if os.path.isfile(fallback):
+            gif_path = fallback
+        else:
+            raise HTTPException(status_code=404, detail=f"Background file not found: {chosen_gif}")
 
     with get_db() as db:
-        slots = db.query(Slot).filter(Slot.guild_id == guild_id).order_by(Slot.slot_number).all()
+        slots = (
+            db.query(Slot)
+            .filter(Slot.guild_id == guild_id)
+            .order_by(Slot.slot_number)
+            .all()
+        )
 
     if not slots:
         raise HTTPException(status_code=404, detail="No slots found for this guild")
 
-    # 🎞 Default animated background (your GIF)
-    DEFAULT_BACKGROUND_URL = (
-        "https://cdn.discordapp.com/attachments/1427732546036174951/1432503283498487845/"
-        "EVERYTHIN3-ezgif.com-video-to-gif-converter.gif?ex=69088a65&is=690738e5&"
-        "hm=cee311e01ffe66fcd0a7c4023140805f1541f4f3d14e5ef4f0b621141c13c287&"
-    )
+    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
+
+    # Determine if the background is animated by extension
+    is_gif = gif_path.lower().endswith(".gif")
 
     for s in slots:
-        bg_url = s.background_url or DEFAULT_BACKGROUND_URL
         teamname = s.teamname or "Unassigned"
         tag = f" ({s.teamtag})" if s.teamtag else ""
         text = f"#{s.slot_number}: {teamname}{tag}"
 
-        # Download background
-        r = httpx.get(bg_url)
-        r.raise_for_status()
-        bg_bytes = io.BytesIO(r.content)
-        content_type = r.headers.get("Content-Type", "").lower()
+        font_family = s.font_family or "arial.ttf"
+        font_size = s.font_size or 64
+        font_color = s.font_color or "#FFFFFF"
+        y_pos = s.padding_top if s.padding_top is not None else None
 
-        # 🧠 Detect GIFs by MIME type instead of file extension
-        if "gif" in content_type:
-            reader = imageio.get_reader(bg_bytes, format="GIF")
-            meta = reader.get_meta_data()
-            duration = meta.get("duration", 80) / 1000.0
-            new_frames = []
+        if is_gif:
+            # Build new animated gif with crisp text on each frame
+            frames = []
+            durations = []
 
-            for frame in reader:
-                # Convert each frame with full brightness
-                img = Image.fromarray(frame).convert("RGBA")
-                img = img.point(lambda p: min(int(p * 1.2), 255))  # safely boost brightness
+            for frame_img, dur in _iter_gif_frames(gif_path):
+                rendered = _draw_text_with_glow(
+                    frame_img, text, font_family, font_size, font_color, y_pos
+                )
+                frames.append(rendered)
+                durations.append(dur)
 
-                upscale = 2
-                large = img.resize((img.width * upscale, img.height * upscale), Image.Resampling.LANCZOS)
-
-                # create text overlay
-                text_layer = Image.new("RGBA", large.size, (0, 0, 0, 0))
-                draw = ImageDraw.Draw(text_layer)
-                font_path = os.path.join("fonts", s.font_family or "arial.ttf")
-                font = ImageFont.truetype(font_path, (s.font_size or 64) * upscale)
-
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                x = (large.width - text_w) / 2
-                y = s.padding_top * upscale if s.padding_top else (large.height // 2 - text_h // 2)
-
-                # ✨ glow effect (bright outline)
-                glow_color = (0, 0, 255, 200)  # blueish glow to match DS theme
-                for radius in range(1, 6):
-                    temp_layer = text_layer.copy()
-                    temp_draw = ImageDraw.Draw(temp_layer)
-                    temp_draw.text((x, y), text, font=font, fill=glow_color)
-                    text_layer = Image.alpha_composite(text_layer, temp_layer.filter(ImageFilter.GaussianBlur(radius)))
-
-                # overlay text in bright white
-                draw = ImageDraw.Draw(text_layer)
-                draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
-
-                combined = Image.alpha_composite(large, text_layer)
-                final = combined.resize(img.size, Image.Resampling.LANCZOS)
-
-                new_frames.append(final.convert("P", dither=Image.Dither.NONE, palette=Image.ADAPTIVE))
-
+            # Save to memory
             out_gif = io.BytesIO()
-            imageio.mimsave(
+            # Convert to palette mode with adaptive palette (reduces banding)
+            pal_frames = [f.convert("P", palette=Image.ADAPTIVE, dither=Image.Dither.NONE) for f in frames]
+            pal_frames[0].save(
                 out_gif,
-                [np.array(f) for f in new_frames],
                 format="GIF",
+                save_all=True,
+                append_images=pal_frames[1:],
+                duration=[int(d * 1000) for d in durations],
                 loop=0,
-                duration=duration,
-                palettesize=256,
-                subrectangles=False,
-                quantizer="nq"
+                optimize=False,
+                disposal=2,
             )
             out_gif.seek(0)
             files = {"file": ("slot.gif", out_gif, "image/gif")}
-
         else:
-            # Static PNG fallback
-            img = Image.open(bg_bytes).convert("RGBA")
-            text_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
-            draw = ImageDraw.Draw(text_layer)
-            font_path = os.path.join("fonts", s.font_family or "arial.ttf")
-            font = ImageFont.truetype(font_path, s.font_size or 64)
-
-            bbox = draw.textbbox((0, 0), text, font=font)
-            text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            x = (img.width - text_w) / 2
-            y = s.padding_top or (img.height // 2 - text_h // 2)
-
-            # glow shadow
-            for dx in range(-3, 4):
-                for dy in range(-3, 4):
-                    draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 100))
-            draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
-
-            img = Image.alpha_composite(img, text_layer)
-
+            # Static image path (png/jpg/webp) – draw once
+            base = Image.open(gif_path).convert("RGBA")
+            final = _draw_text_with_glow(base, text, font_family, font_size, font_color, y_pos)
             out_img = io.BytesIO()
-            img.save(out_img, format="PNG")
+            final.save(out_img, format="PNG")
             out_img.seek(0)
             files = {"file": ("slot.png", out_img, "image/png")}
 
-        # upload to Discord
+        # Upload to Discord
         upload = httpx.post(
             f"https://discord.com/api/v10/channels/{channel_id}/messages",
             headers=headers,
-            files=files
+            files=files,
+            timeout=60.0,
         )
 
-        # handle rate limits gracefully
         if upload.status_code == 429:
+            # Respect rate limit and retry once
             retry_after = upload.json().get("retry_after", 2)
-            print(f"Rate-limited! Waiting {retry_after}s…")
-            time.sleep(retry_after)
-            continue
+            time.sleep(float(retry_after) + 0.5)
+            upload = httpx.post(
+                f"https://discord.com/api/v10/channels/{channel_id}/messages",
+                headers=headers,
+                files=files,
+                timeout=60.0,
+            )
 
         upload.raise_for_status()
+        # Friendly pacing to avoid global rate limits (5 msgs/sec per bot)
+        time.sleep(1.0)
 
-        # ✅ prevent hitting Discord’s 5 msgs/sec limit
-        time.sleep(1)
-
-    # end of loop
     return {"status": "sent"}
 
-from fastapi import Body
-
-@app.post("/api/guilds/{guild_id}/slots/{slot_number}")
-def update_slot(guild_id: str, slot_number: int, data: dict = Body(...)):
-    with get_db() as db:
-        slot = db.query(Slot).filter(
-            Slot.guild_id == guild_id, Slot.slot_number == slot_number
-        ).first()
-
-        if not slot:
-            raise HTTPException(status_code=404, detail="Slot not found")
-
-        # Update fields
-        slot.teamname = data.get("teamname")
-        slot.teamtag = data.get("teamtag")
-        slot.emoji = data.get("emoji")
-        slot.background_url = data.get("background_url")
-
-        # Optional: if you want to save which channel slots go to
-        if "channel_id" in data:
-            slot.channel_id = data.get("channel_id")
-
-        db.commit()
-
-    return {"status": "ok", "slot_number": slot_number}
-@app.post("/api/guilds/{guild_id}/send_slots")
-def send_slots(guild_id: str, data: dict = Body(...)):
-    channel_id = data.get("channel_id")
-    if not channel_id:
-        raise HTTPException(status_code=400, detail="channel_id missing")
-
-    with get_db() as db:
-        slots = db.query(Slot).filter(Slot.guild_id == guild_id).order_by(Slot.slot_number).all()
-
-    content = "\n".join(
-        f"#{s.slot_number} {s.teamname or 'Unassigned'} ({s.teamtag or ''})"
-        for s in slots
-    )
-
-    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
-    payload = {"content": f"**Slot List for {guild_id}:**\n{content}"}
-
-    httpx.post(f"https://discord.com/api/v10/channels/{channel_id}/messages", json=payload, headers=headers)
-
-    return {"status": "ok"}
-
-@app.post("/api/guilds/{guild_id}/slots/{slot_number}/upload")
-async def upload_background(guild_id: str, slot_number: int, file: UploadFile = File(...)):
-    contents = await file.read()
-    public_id = f"slot_{guild_id}_{slot_number}_{int(__import__('time').time())}"
-
-    # upload_large handles big GIFs
-    res = cloudinary.uploader.upload_large(
-        io.BytesIO(contents),
-        public_id=public_id,
-        resource_type="auto",
-        overwrite=True,
-    )
-    url = res.get("secure_url") or res.get("url")
-    is_gif = 1 if (res.get("format", "") or "").lower() == "gif" else 0
-
-    with get_db() as db:
-        slot = db.query(Slot).filter(Slot.guild_id == guild_id, Slot.slot_number == slot_number).first()
-        if not slot:
-            slot = Slot(guild_id=guild_id, slot_number=slot_number)
-            db.add(slot)
-        slot.background_url = url
-        slot.is_gif = is_gif
-        db.commit()
-
-    return {"url": url, "is_gif": bool(is_gif)}
-
-@app.post("/api/guilds/{guild_id}/slots/{slot_number}")
-def update_slot(guild_id: str, slot_number: int, payload: SlotUpdate):
-    with get_db() as db:
-        slot = db.query(Slot).filter(Slot.guild_id == guild_id, Slot.slot_number == slot_number).first()
-        if not slot:
-            slot = Slot(guild_id=guild_id, slot_number=slot_number)
-            db.add(slot)
-
-        slot.teamname = payload.teamname
-        slot.teamtag = payload.teamtag
-        slot.emoji = payload.emoji
-        slot.font_family = payload.font_family
-        slot.font_size = payload.font_size
-        slot.font_color = payload.font_color
-        slot.is_gif = payload.is_gif
-        slot.padding_top = payload.padding_top
-        slot.padding_bottom = payload.padding_bottom
-
-        db.commit()
-
-    return {"ok": True}
-
-# -----------------------------
-# Guild channel config
-# -----------------------------
-@app.post("/api/guilds/{guild_id}/channel")
-def set_channel(guild_id: str, channel_id: str = Form(...)):
-    with get_db() as db:
-        cfg = db.query(GuildConfig).filter(GuildConfig.guild_id == guild_id).first()
-        if not cfg:
-            cfg = GuildConfig(guild_id=guild_id, channel_id=channel_id)
-            db.add(cfg)
-        else:
-            cfg.channel_id = channel_id
-        db.commit()
-    return {"ok": True}
-
-@app.get("/api/guilds/{guild_id}/channel")
-def get_channel(guild_id: str):
-    with get_db() as db:
-        cfg = db.query(GuildConfig).filter(GuildConfig.guild_id == guild_id).first()
-        return {"channel_id": cfg.channel_id if cfg else ""}
-
-@app.get("/api/guilds/{guild_id}/channels")
-def get_guild_channels(guild_id: str):
-    """Fetches all text channels for a guild using the bot token."""
-    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
-    r = httpx.get(f"https://discord.com/api/v10/guilds/{guild_id}/channels", headers=headers)
-    r.raise_for_status()
-    channels = r.json()
-
-    # Only return text channels (type == 0)
-    text_channels = [
-        {"id": ch["id"], "name": ch["name"]}
-        for ch in channels
-        if ch.get("type") == 0
-    ]
-    return text_channels
-
-# -----------------------------
-# Image generation
-# -----------------------------
-@app.get("/api/generate/{guild_id}/{slot_number}")
-def api_generate(guild_id: str, slot_number: int):
-    with get_db() as db:
-        slot = db.query(Slot).filter(Slot.guild_id == guild_id, Slot.slot_number == slot_number).first()
-        if not slot:
-            raise HTTPException(status_code=404, detail="Slot not found")
-
-        meta = {
-            "slot_number": slot.slot_number,
-            "teamname": slot.teamname,
-            "teamtag": slot.teamtag,
-            "emoji": slot.emoji,
-            "font_family": slot.font_family,
-            "font_size": slot.font_size,
-            "font_color": slot.font_color,
-            "padding_top": slot.padding_top,
-            "padding_bottom": slot.padding_bottom,
-        }
-
-        if not slot.background_url:
-            from PIL import Image
-            im = Image.new("RGBA", (1280, 120), (10, 22, 50, 255))
-            im = draw_slot_on_image(im, meta)
-            out = io.BytesIO()
-            im.save(out, format="PNG")
-            out.seek(0)
-            return StreamingResponse(out, media_type="image/png")
-
-        bg_bytes, content_type = fetch_image_bytes(slot.background_url)
-        out_bytes, mime = generate_from_url_bytes(bg_bytes, content_type, meta)
-        return StreamingResponse(io.BytesIO(out_bytes), media_type=mime)
-
-# -----------------------------
-# Placeholder: bot-triggered send
-# -----------------------------
-@app.post("/api/guilds/{guild_id}/send/{slot_number}")
-def trigger_send(guild_id: str, slot_number: int):
-    return {"ok": True}
-
-# -----------------------------
-# Health check (optional)
-# -----------------------------
-@app.get("/healthz")
-def healthz():
-    return {"ok": True}
+# --- Root (optional) ----------------------------------------------------------
+@app.get("/")
+def root():
+    return {"ok": True, "service": "slotmanager-backend"}

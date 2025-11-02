@@ -318,19 +318,19 @@ def get_channel(guild_id: str):
         cfg = db.query(GuildConfig).filter(GuildConfig.guild_id == guild_id).first()
         return {"channel_id": cfg.channel_id if cfg else ""}
 
-@app.get("/api/guilds/{guild_id}/channels")
+app.get("/api/guilds/{guild_id}/channels")
 def get_guild_channels(guild_id: str):
-    if not DISCORD_BOT_TOKEN:
-        raise HTTPException(status_code=500, detail="Bot token not configured")
+    """Fetches all text channels for a guild using the bot token."""
     headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
-    url = f"https://discord.com/api/v10/guilds/{guild_id}/channels"
-    resp = httpx.get(url, headers=headers, timeout=20.0)
-    resp.raise_for_status()
-    channels = resp.json()
+    r = httpx.get(f"https://discord.com/api/v10/guilds/{guild_id}/channels", headers=headers)
+    r.raise_for_status()
+    channels = r.json()
+
+    # Only return text channels (type == 0)
     text_channels = [
-        {"id": c["id"], "name": c.get("name"), "type": c.get("type")}
-        for c in channels
-        if c.get("type") in (0, 5)  # text & announcement
+        {"id": ch["id"], "name": ch["name"]}
+        for ch in channels
+        if ch.get("type") == 0
     ]
     return {"channels": text_channels}
 

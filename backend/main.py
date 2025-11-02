@@ -36,7 +36,8 @@ def get_db():
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-
+# Default background for slot banners (if none set per slot)
+DEFAULT_BACKGROUND_URL = "https://cdn.discordapp.com/attachments/1427732546036174951/1432503283498487845/EVERYTHIN3-ezgif.com-video-to-gif-converter.gif?ex=69088a65&is=690738e5&hm=cee311e01ffe66fcd0a7c4023140805f1541f4f3d14e5ef4f0b621141c13c287&"  # ← replace with your default image link
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", f"{BACKEND_URL}/auth/callback")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://slotmanager-frontend.onrender.com")

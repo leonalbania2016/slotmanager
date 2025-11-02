@@ -203,6 +203,31 @@ def list_slots(guild_id: str):
             }
             for s in slots
         ]
+from fastapi import Body
+
+@app.post("/api/guilds/{guild_id}/slots/{slot_number}")
+def update_slot(guild_id: str, slot_number: int, data: dict = Body(...)):
+    with get_db() as db:
+        slot = db.query(Slot).filter(
+            Slot.guild_id == guild_id, Slot.slot_number == slot_number
+        ).first()
+
+        if not slot:
+            raise HTTPException(status_code=404, detail="Slot not found")
+
+        # Update fields
+        slot.teamname = data.get("teamname")
+        slot.teamtag = data.get("teamtag")
+        slot.emoji = data.get("emoji")
+        slot.background_url = data.get("background_url")
+
+        # Optional: if you want to save which channel slots go to
+        if "channel_id" in data:
+            slot.channel_id = data.get("channel_id")
+
+        db.commit()
+
+    return {"status": "ok", "slot_number": slot_number}
 
 @app.post("/api/guilds/{guild_id}/slots/{slot_number}/upload")
 async def upload_background(guild_id: str, slot_number: int, file: UploadFile = File(...)):

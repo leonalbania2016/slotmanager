@@ -213,44 +213,88 @@ def list_slots(guild_id: str):
             for s in slots
         ]
 from fastapi import Body, HTTPException
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
+import httpx
 
 @app.post("/api/guilds/{guild_id}/send_slots")
 def send_slots(guild_id: str, payload: dict = Body(...)):
     """
-    Sends the slot list to a specific Discord channel.
+    Sends all slots as image banners with customizable text properties.
     """
     channel_id = payload.get("channel_id")
     if not channel_id:
-        raise HTTPException(status_code=400, detail="Missing channel_id in request body")
+        raise HTTPException(status_code=400, detail="Missing channel_id")
 
-    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
 
     with get_db() as db:
         slots = db.query(Slot).filter(Slot.guild_id == guild_id).order_by(Slot.slot_number).all()
 
     if not slots:
-        raise HTTPException(status_code=404, detail="No slots found for this guild")
+        raise HTTPException(status_code=404, detail="No slots found")
 
-    # Build slot message
-    content = "**🎯 Slot List**\n"
     for s in slots:
-        team = s.teamname or "Unassigned"
+        # Load background
+        bg_url = s.background_url or DEFAULT_BACKGROUND_URL
+        try:
+            bg_data = httpx.get(bg_url).content
+            img = Image.open(BytesIO(bg_data)).convert("RGBA")
+        except Exception as e:
+            print("Failed to load background:", e)
+            continue
+
+        draw = ImageDraw.Draw(img)
+
+        # --- Custom styling ---
+        font_family = s.font_family or "arial.ttf"
+        font_size = s.font_size or 64
+        font_color = s.font_color or "#FFFFFF"
+        padding_top = s.padding_top or 100
+        padding_bottom = s.padding_bottom or 100
+
+        try:
+            font = ImageFont.truetype(font_family, font_size)
+        except:
+            font = ImageFont.truetype("arial.ttf", font_size)
+
+        # Build slot text
+        team_name = s.teamname or "Unassigned"
         tag = f" ({s.teamtag})" if s.teamtag else ""
-        content += f"#{s.slot_number}: {team}{tag}\n"
+        text = f"{team_name}{tag}"
 
-    # Send to Discord channel
-    payload = {"content": content}
-    r = httpx.post(
-        f"https://discord.com/api/v10/channels/{channel_id}/messages",
-        headers=headers,
-        json=payload
-    )
+        # Center text
+        img_w, img_h = img.size
+        text_w, text_h = draw.textsize(text, font=font)
+        x = (img_w - text_w) / 2
+        y = padding_top
 
-    if r.status_code >= 400:
-        print("Discord API error:", r.text)
-        raise HTTPException(status_code=500, detail=f"Discord error: {r.text}")
+        # Optional: add outline for readability
+        shadow_offset = 3
+        draw.text((x - shadow_offset, y - shadow_offset), text, font=font, fill="black")
+        draw.text((x + shadow_offset, y - shadow_offset), text, font=font, fill="black")
+        draw.text((x - shadow_offset, y + shadow_offset), text, font=font, fill="black")
+        draw.text((x + shadow_offset, y + shadow_offset), text, font=font, fill="black")
 
-    return {"status": "sent", "channel_id": channel_id}
+        # Main text
+        draw.text((x, y), text, font=font, fill=font_color)
+
+        # Save and send to Discord
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+        files = {"file": ("slot.png", buffer, "image/png")}
+
+        response = httpx.post(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages",
+            headers=headers,
+            files=files
+        )
+
+        if response.status_code >= 400:
+            print("Discord upload error:", response.text)
+
+    return {"status": "sent"}
 
 from fastapi import Body
 

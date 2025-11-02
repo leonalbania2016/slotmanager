@@ -231,6 +231,7 @@ class SendSlotsBody(BaseModel):
 def send_slots(guild_id: str, body: SendSlotsBody):
     """
     Sends each slot as an image (or animated GIF) to a Discord channel.
+    Supports font color, padding, and glowing text on animated backgrounds.
     """
     channel_id = body.channel_id
     headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
@@ -240,6 +241,13 @@ def send_slots(guild_id: str, body: SendSlotsBody):
 
     if not slots:
         raise HTTPException(status_code=404, detail="No slots found for this guild")
+
+    # 🎞 Default animated background (your GIF)
+    DEFAULT_BACKGROUND_URL = (
+        "https://cdn.discordapp.com/attachments/1427732546036174951/1432503283498487845/"
+        "EVERYTHIN3-ezgif.com-video-to-gif-converter.gif?ex=69088a65&is=690738e5&"
+        "hm=cee311e01ffe66fcd0a7c4023140805f1541f4f3d14e5ef4f0b621141c13c287&"
+    )
 
     for s in slots:
         bg_url = s.background_url or DEFAULT_BACKGROUND_URL
@@ -252,35 +260,54 @@ def send_slots(guild_id: str, body: SendSlotsBody):
         r.raise_for_status()
         bg_bytes = io.BytesIO(r.content)
 
-        # 🧠 handle GIFs vs static images
-        if bg_url.lower().endswith(".gif"):
+        content_type = r.headers.get("Content-Type", "").lower()
+
+        # 🧠 Detect GIFs by MIME type instead of .gif ending
+        if "gif" in content_type:
             frames = imageio.mimread(bg_bytes, memtest=False)
             new_frames = []
             for frame in frames:
-                img = Image.fromarray(frame)
+                img = Image.fromarray(frame).convert("RGBA")
                 draw = ImageDraw.Draw(img)
                 font_path = os.path.join("fonts", s.font_family or "arial.ttf")
                 font = ImageFont.truetype(font_path, s.font_size or 64)
+
                 bbox = draw.textbbox((0, 0), text, font=font)
                 text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
                 x = (img.width - text_w) / 2
-                y = s.padding_top or 100
+                y = s.padding_top or (img.height // 2 - text_h // 2)
+
+                # ✨ Draw shadow glow for readability
+                shadow_color = "black"
+                for dx in range(-2, 3):
+                    for dy in range(-2, 3):
+                        draw.text((x + dx, y + dy), text, font=font, fill=shadow_color)
+
                 draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
+
                 new_frames.append(np.array(img))
 
             out_gif = io.BytesIO()
             imageio.mimsave(out_gif, new_frames, format="GIF", loop=0, duration=0.08)
             out_gif.seek(0)
             files = {"file": ("slot.gif", out_gif, "image/gif")}
+
         else:
             img = Image.open(bg_bytes).convert("RGBA")
             draw = ImageDraw.Draw(img)
             font_path = os.path.join("fonts", s.font_family or "arial.ttf")
             font = ImageFont.truetype(font_path, s.font_size or 64)
+
             bbox = draw.textbbox((0, 0), text, font=font)
             text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
             x = (img.width - text_w) / 2
-            y = s.padding_top or 100
+            y = s.padding_top or (img.height // 2 - text_h // 2)
+
+            # ✨ Text shadow for visibility
+            for dx in range(-2, 3):
+                for dy in range(-2, 3):
+                    draw.text((x + dx, y + dy), text, font=font, fill="black")
+
             draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
 
             out_img = io.BytesIO()
@@ -295,19 +322,18 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             files=files
         )
 
-        # if Discord rate-limits, wait & retry
+        # handle rate limits
         if upload.status_code == 429:
             retry_after = upload.json().get("retry_after", 2)
-            print(f"Rate-limited! Waiting {retry_after} seconds...")
+            print(f"Rate-limited! Waiting {retry_after}s…")
             time.sleep(retry_after)
-            continue  # skip or resend next slot
+            continue
 
         upload.raise_for_status()
-
-        # ✅ prevent hitting rate limits
         time.sleep(1)
 
     return {"status": "sent"}
+
 
 
 from fastapi import Body

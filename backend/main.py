@@ -275,10 +275,11 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             for frame in reader:
                 img = Image.fromarray(frame).convert("RGBA")
 
-                # upscale for sharper text, then downscale
+                # upscale for sharper text
                 upscale = 2
                 large = img.resize((img.width * upscale, img.height * upscale), Image.Resampling.LANCZOS)
 
+                # draw text on transparent overlay
                 text_layer = Image.new("RGBA", large.size, (0, 0, 0, 0))
                 draw = ImageDraw.Draw(text_layer)
                 font_path = os.path.join("fonts", s.font_family or "arial.ttf")
@@ -289,53 +290,31 @@ def send_slots(guild_id: str, body: SendSlotsBody):
                 x = (large.width - text_w) / 2
                 y = s.padding_top * upscale if s.padding_top else (large.height // 2 - text_h // 2)
 
-                # shadow for contrast
+                # smooth glow for contrast
                 for dx in range(-3, 4):
                     for dy in range(-3, 4):
-                        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 160))
+                        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 150))
                 draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
 
+                # merge and downscale back
                 combined = Image.alpha_composite(large, text_layer)
                 final = combined.resize(img.size, Image.Resampling.LANCZOS)
-                new_frames.append(np.array(final))
+                new_frames.append(final.convert("P", dither=Image.Dither.NONE, palette=Image.ADAPTIVE))
 
+            # Save as GIF but avoid excessive compression
             out_gif = io.BytesIO()
             imageio.mimsave(
                 out_gif,
-                new_frames,
+                [np.array(f) for f in new_frames],
                 format="GIF",
                 loop=0,
                 duration=duration,
                 palettesize=256,
-                subrectangles=True
+                subrectangles=False,  # disable subrects for consistent frame quality
+                quantizer="nq"  # use better quantization for color smoothness
             )
             out_gif.seek(0)
             files = {"file": ("slot.gif", out_gif, "image/gif")}
-
-        else:
-            img = Image.open(bg_bytes).convert("RGBA")
-            text_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
-            draw = ImageDraw.Draw(text_layer)
-            font_path = os.path.join("fonts", s.font_family or "arial.ttf")
-            font = ImageFont.truetype(font_path, s.font_size or 64)
-
-            bbox = draw.textbbox((0, 0), text, font=font)
-            text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            x = (img.width - text_w) / 2
-            y = s.padding_top or (img.height // 2 - text_h // 2)
-
-            # soft shadow
-            for dx in range(-3, 4):
-                for dy in range(-3, 4):
-                    draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 100))
-            draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
-
-            img = Image.alpha_composite(img, text_layer)
-
-            out_img = io.BytesIO()
-            img.save(out_img, format="PNG")
-            out_img.seek(0)
-            files = {"file": ("slot.png", out_img, "image/png")}
 
         # upload to Discord
         upload = httpx.post(

@@ -453,7 +453,7 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             )
 
         upload.raise_for_status()
-        time.sleep(1.0)  # Discord global rate limit: 5 messages/sec
+        time.sleep(0.3)  # Discord global rate limit: 5 messages/sec
 
     return {"status": "sent"}
 

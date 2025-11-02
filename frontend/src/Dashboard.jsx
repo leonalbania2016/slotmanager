@@ -9,9 +9,12 @@ export default function Dashboard() {
   const [selectedChannel, setSelectedChannel] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Fetch slots and background
+  const API_URL = "https://slotmanager-backend.onrender.com";
+
+  // Fetch slots for this guild
   useEffect(() => {
-    fetch(`https://slotmanager-backend.onrender.com/api/guilds/${guild_id}/slots`)
+    if (!guild_id) return;
+    fetch(`${API_URL}/api/guilds/${guild_id}/slots`)
       .then((res) => res.json())
       .then((data) => {
         setSlots(data);
@@ -22,22 +25,31 @@ export default function Dashboard() {
       .catch((err) => console.error("Error loading slots:", err));
   }, [guild_id]);
 
-  // Fetch Discord channels
+  // Fetch all channels for this guild
   useEffect(() => {
-    fetch(`https://slotmanager-backend.onrender.com/api/guilds/${guild_id}/channels`)
+    if (!guild_id) return;
+    fetch(`${API_URL}/api/guilds/${guild_id}/channels`)
       .then((res) => res.json())
       .then((data) => {
-        setChannels(data.channels);
+        if (data && Array.isArray(data)) {
+          setChannels(data);
+        } else if (data.channels) {
+          setChannels(data.channels);
+        } else {
+          console.warn("Unexpected channels response:", data);
+        }
       })
       .catch((err) => console.error("Failed to load channels:", err));
   }, [guild_id]);
 
+  // Update slot values locally
   const updateSlot = (index, key, value) => {
     const updated = [...slots];
     updated[index][key] = value;
     setSlots(updated);
   };
 
+  // Save single slot to backend
   const saveSlot = async (slot) => {
     if (!selectedChannel) {
       alert("Please select a Discord channel first!");
@@ -47,7 +59,7 @@ export default function Dashboard() {
     setSaving(true);
     try {
       const res = await fetch(
-        `https://slotmanager-backend.onrender.com/api/guilds/${guild_id}/slots/${slot.slot_number}`,
+        `${API_URL}/api/guilds/${guild_id}/slots/${slot.slot_number}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -60,7 +72,9 @@ export default function Dashboard() {
           }),
         }
       );
+
       if (!res.ok) throw new Error("Save failed");
+      console.log(`Slot #${slot.slot_number} saved successfully.`);
     } catch (err) {
       console.error(err);
       alert("❌ Failed to save slot");
@@ -69,6 +83,7 @@ export default function Dashboard() {
     }
   };
 
+  // Save all slots
   const saveAll = async () => {
     if (!selectedChannel) {
       alert("Please select a Discord channel first!");
@@ -89,17 +104,19 @@ export default function Dashboard() {
       <div className="mb-8 bg-gray-800 p-4 rounded-lg">
         <h2 className="text-xl font-semibold mb-2">Global Settings</h2>
 
-        {/* Background URL input */}
+        {/* Background URL (applies to all slots) */}
         <input
           className="w-full bg-gray-700 p-2 rounded mb-3"
-          placeholder="Background GIF URL"
+          placeholder="Background GIF URL (applies to all slots)"
           value={backgroundUrl}
           onChange={(e) => setBackgroundUrl(e.target.value)}
         />
 
         {/* Channel Dropdown */}
         <div className="mb-3">
-          <label className="block mb-2 font-semibold">Select Discord Channel:</label>
+          <label className="block mb-2 font-semibold">
+            Select Discord Channel:
+          </label>
           <select
             value={selectedChannel}
             onChange={(e) => setSelectedChannel(e.target.value)}
@@ -142,7 +159,7 @@ export default function Dashboard() {
               onChange={(e) => updateSlot(index, "teamtag", e.target.value)}
             />
 
-            {/* Emoji dropdown (Yes / No) */}
+            {/* Emoji dropdown (Yes / No only) */}
             <select
               className="w-full bg-gray-700 rounded p-2 mb-2"
               value={slot.emoji || ""}

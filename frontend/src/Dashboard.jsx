@@ -135,6 +135,29 @@ useEffect(() => {
               </option>
             ))}
           </select>
+          <button
+  onClick={() => {
+    if (!selectedChannel) return alert("Please select a channel first!");
+    fetch(`${API_URL}/api/guilds/${guild_id}/send_slots`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel_id: selectedChannel }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === "sent") alert("✅ Slots sent successfully!");
+        else alert("❌ Failed to send slots.");
+      })
+      .catch((err) => {
+        console.error("Failed to send slots:", err);
+        alert("❌ Error sending slots.");
+      });
+  }}
+  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-2"
+>
+  📤 Send Slots to Discord
+</button>
+
         </div>
       </div>
 

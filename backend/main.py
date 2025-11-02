@@ -212,6 +212,35 @@ def list_slots(guild_id: str):
             }
             for s in slots
         ]
+@app.post("/api/guilds/{guild_id}/send_slots")
+def send_slots(guild_id: str, channel_id: str = Body(...)):
+    """
+    Sends the slot list to a specific Discord channel.
+    """
+    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "Content-Type": "application/json"}
+
+    with get_db() as db:
+        slots = db.query(Slot).filter(Slot.guild_id == guild_id).order_by(Slot.slot_number).all()
+
+    if not slots:
+        raise HTTPException(status_code=404, detail="No slots found for this guild")
+
+    content = "**🎯 Slot List**\n"
+    for s in slots:
+        team = s.teamname or "Unassigned"
+        tag = f" ({s.teamtag})" if s.teamtag else ""
+        content += f"#{s.slot_number}: {team}{tag}\n"
+
+    payload = {"content": content}
+    r = httpx.post(
+        f"https://discord.com/api/v10/channels/{channel_id}/messages",
+        headers=headers,
+        json=payload
+    )
+    r.raise_for_status()
+
+    return {"status": "sent", "channel_id": channel_id}
+
 from fastapi import Body
 
 @app.post("/api/guilds/{guild_id}/slots/{slot_number}")

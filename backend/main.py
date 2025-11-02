@@ -1,6 +1,11 @@
 import os
 import io
 import secrets
+import httpx
+import numpy as np
+import imageio
+from PIL import Image, ImageDraw, ImageFont
+from fastapi import Body
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 from urllib.parse import urlencode
@@ -218,83 +223,82 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import httpx
 
-@app.post("/api/guilds/{guild_id}/send_slots")
-def send_slots(guild_id: str, payload: dict = Body(...)):
-    """
-    Sends all slots as image banners with customizable text properties.
-    """
-    channel_id = payload.get("channel_id")
-    if not channel_id:
-        raise HTTPException(status_code=400, detail="Missing channel_id")
+import imageio
+from PIL import Image, ImageDraw, ImageFont
+import io
 
-    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
+@app.post("/api/guilds/{guild_id}/send_slots")
+def send_slots(guild_id: str, channel_id: str = Body(...)):
+    """
+    Sends the slot list as images to a Discord channel.
+    Keeps GIF animation if the background is animated.
+    """
+    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "Content-Type": "application/json"}
 
     with get_db() as db:
         slots = db.query(Slot).filter(Slot.guild_id == guild_id).order_by(Slot.slot_number).all()
 
     if not slots:
-        raise HTTPException(status_code=404, detail="No slots found")
+        raise HTTPException(status_code=404, detail="No slots found for this guild")
+
+    # Default background (still or animated)
+    DEFAULT_BACKGROUND_URL = "https://cdn.discordapp.com/attachments/xxxx/slot_bg.gif"
 
     for s in slots:
-        # Load background
         bg_url = s.background_url or DEFAULT_BACKGROUND_URL
-        try:
-            bg_data = httpx.get(bg_url).content
-            img = Image.open(BytesIO(bg_data)).convert("RGBA")
-        except Exception as e:
-            print("Failed to load background:", e)
-            continue
-
-        draw = ImageDraw.Draw(img)
-
-        # --- Custom styling ---
-        font_family = s.font_family or "arial.ttf"
-        font_size = s.font_size or 64
-        font_color = s.font_color or "#FFFFFF"
-        padding_top = s.padding_top or 100
-        padding_bottom = s.padding_bottom or 100
-
-        try:
-            font = ImageFont.truetype(font_family, font_size)
-        except:
-            font = ImageFont.truetype("arial.ttf", font_size)
-
-        # Build slot text
-        team_name = s.teamname or "Unassigned"
+        teamname = s.teamname or "Unassigned"
         tag = f" ({s.teamtag})" if s.teamtag else ""
-        text = f"{team_name}{tag}"
+        text = f"#{s.slot_number}: {teamname}{tag}"
 
-        # Center text
-        img_w, img_h = img.size
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        x = (img_w - text_w) / 2
-        y = padding_top
+        # Download background
+        r = httpx.get(bg_url)
+        r.raise_for_status()
+        bg_bytes = io.BytesIO(r.content)
 
-        # Optional: add outline for readability
-        shadow_offset = 3
-        draw.text((x - shadow_offset, y - shadow_offset), text, font=font, fill="black")
-        draw.text((x + shadow_offset, y - shadow_offset), text, font=font, fill="black")
-        draw.text((x - shadow_offset, y + shadow_offset), text, font=font, fill="black")
-        draw.text((x + shadow_offset, y + shadow_offset), text, font=font, fill="black")
+        # 🧠 Detect GIFs
+        if bg_url.lower().endswith(".gif"):
+            frames = imageio.mimread(bg_bytes, memtest=False)
+            new_frames = []
+            for frame in frames:
+                img = Image.fromarray(frame)
+                draw = ImageDraw.Draw(img)
+                font_path = os.path.join("fonts", s.font_family or "arial.ttf")
+                font = ImageFont.truetype(font_path, s.font_size or 64)
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                x = (img.width - text_w) / 2
+                y = s.padding_top or 100
+                draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
+                new_frames.append(np.array(img))
 
-        # Main text
-        draw.text((x, y), text, font=font, fill=font_color)
+            # Save as animated GIF again
+            out_gif = io.BytesIO()
+            imageio.mimsave(out_gif, new_frames, format="GIF", loop=0, duration=0.08)
+            out_gif.seek(0)
+            files = {"file": ("slot.gif", out_gif, "image/gif")}
+        else:
+            img = Image.open(bg_bytes).convert("RGBA")
+            draw = ImageDraw.Draw(img)
+            font_path = os.path.join("fonts", s.font_family or "arial.ttf")
+            font = ImageFont.truetype(font_path, s.font_size or 64)
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            x = (img.width - text_w) / 2
+            y = s.padding_top or 100
+            draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
 
-        # Save and send to Discord
-        buffer = BytesIO()
-        img.save(buffer, format="PNG")
-        buffer.seek(0)
-        files = {"file": ("slot.png", buffer, "image/png")}
+            out_img = io.BytesIO()
+            img.save(out_img, format="PNG")
+            out_img.seek(0)
+            files = {"file": ("slot.png", out_img, "image/png")}
 
-        response = httpx.post(
+        # Upload to Discord
+        upload = httpx.post(
             f"https://discord.com/api/v10/channels/{channel_id}/messages",
-            headers=headers,
+            headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}"},
             files=files
         )
-
-        if response.status_code >= 400:
-            print("Discord upload error:", response.text)
+        upload.raise_for_status()
 
     return {"status": "sent"}
 

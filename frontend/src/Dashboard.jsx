@@ -11,6 +11,8 @@ export default function Dashboard() {
 
   const API_URL = "https://slotmanager-backend.onrender.com";
 
+  console.log("Dashboard loaded for guild:", guild_id);
+
  // Fetch slots for this guild
 useEffect(() => {
   if (!guild_id) return;

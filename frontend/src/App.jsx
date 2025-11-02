@@ -4,22 +4,22 @@ export default function App() {
   const [guilds, setGuilds] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Environment variables (fallback to defaults if not set)
+  // ✅ Environment variables with defaults
   const API_URL = import.meta.env.VITE_API_URL || "https://slotmanager-backend.onrender.com";
   const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID || "1432457167306227885";
   const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || `${API_URL}/auth/callback`;
   const FRONTEND_URL = import.meta.env.VITE_FRONTEND_URL || "https://slotmanager-frontend.onrender.com";
 
+  // ✅ Check for session and fetch guilds
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const session = params.get("session"); // ✅ replaced token with session
+    const session = params.get("session"); // Using short session ID instead of JWT
 
     if (!session) {
       setLoading(false);
       return;
     }
 
-    // ✅ Fetch guilds via session ID
     fetch(`${API_URL}/api/decode?session=${session}`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to decode session");
@@ -32,6 +32,7 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
+  // ✅ Discord OAuth2 login
   const handleLogin = () => {
     const params = new URLSearchParams({
       client_id: CLIENT_ID,
@@ -42,6 +43,12 @@ export default function App() {
     window.location.href = `https://discord.com/oauth2/authorize?${params.toString()}`;
   };
 
+  // ✅ On guild click, go to dashboard
+  const handleSelectGuild = (guild) => {
+    window.location.href = `${FRONTEND_URL}/dashboard/${guild.id}`;
+  };
+
+  // ✅ Loading state
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
@@ -50,6 +57,7 @@ export default function App() {
     );
   }
 
+  // ✅ If not logged in
   if (!guilds.length) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-white">
@@ -64,6 +72,7 @@ export default function App() {
     );
   }
 
+  // ✅ Guild selection
   return (
     <div className="p-10 text-white bg-gray-900 min-h-screen">
       <h1 className="text-3xl font-bold mb-6">Select a Server</h1>
@@ -71,7 +80,8 @@ export default function App() {
         {guilds.map((g) => (
           <div
             key={g.id}
-            className="bg-gray-800 p-4 rounded-lg flex items-center gap-3 hover:bg-gray-700 transition"
+            onClick={() => handleSelectGuild(g)}
+            className="bg-gray-800 p-4 rounded-lg flex items-center gap-3 hover:bg-indigo-600 cursor-pointer transition"
           >
             {g.icon ? (
               <img
@@ -84,7 +94,7 @@ export default function App() {
                 ?
               </div>
             )}
-            <span>{g.name}</span>
+            <span className="text-lg">{g.name}</span>
           </div>
         ))}
       </div>

@@ -11,36 +11,40 @@ export default function Dashboard() {
 
   const API_URL = "https://slotmanager-backend.onrender.com";
 
-  // Fetch slots for this guild
-  useEffect(() => {
-    if (!guild_id) return;
-    fetch(`${API_URL}/api/guilds/${guild_id}/slots`)
-      .then((res) => res.json())
-      .then((data) => {
-        setSlots(data);
-        if (data.length > 0 && data[0].background_url) {
-          setBackgroundUrl(data[0].background_url);
-        }
-      })
-      .catch((err) => console.error("Error loading slots:", err));
-  }, [guild_id]);
+ // Fetch slots for this guild
+useEffect(() => {
+  if (!guild_id) return;
+  fetch(`${API_URL}/api/guilds/${guild_id}/slots`)
+    .then((res) => res.json())
+    .then((data) => {
+      setSlots(data);
+      if (data.length > 0 && data[0].background_url) {
+        setBackgroundUrl(data[0].background_url);
+      }
+    })
+    .catch((err) => console.error("Error loading slots:", err));
+}, [guild_id]);
 
-  // Fetch all channels for this guild
-  useEffect(() => {
-    if (!guild_id) return;
-    fetch(`${API_URL}/api/guilds/${guild_id}/channels`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && Array.isArray(data)) {
-          setChannels(data);
-        } else if (data.channels) {
-          setChannels(data.channels);
-        } else {
-          console.warn("Unexpected channels response:", data);
-        }
-      })
-      .catch((err) => console.error("Failed to load channels:", err));
-  }, [guild_id]);
+// Fetch all channels for this guild
+useEffect(() => {
+  if (!guild_id) return;
+  fetch(`${API_URL}/api/guilds/${guild_id}/channels`)
+    .then((res) => res.json())
+    .then((data) => {
+      console.log("Fetched channels:", data); // 👈 logs what backend returns
+      if (Array.isArray(data)) {
+        // backend returns a plain list like [{id, name}, ...]
+        setChannels(data);
+      } else if (data.channels && Array.isArray(data.channels)) {
+        // or if it’s wrapped like { channels: [...] }
+        setChannels(data.channels);
+      } else {
+        console.warn("Unexpected channels response:", data);
+      }
+    })
+    .catch((err) => console.error("Failed to load channels:", err));
+}, [guild_id]);
+
 
   // Update slot values locally
   const updateSlot = (index, key, value) => {

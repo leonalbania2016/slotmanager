@@ -318,7 +318,7 @@ def get_channel(guild_id: str):
         cfg = db.query(GuildConfig).filter(GuildConfig.guild_id == guild_id).first()
         return {"channel_id": cfg.channel_id if cfg else ""}
 
-app.get("/api/guilds/{guild_id}/channels")
+@app.get("/api/guilds/{guild_id}/channels")
 def get_guild_channels(guild_id: str):
     """Fetches all text channels for a guild using the bot token."""
     headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
@@ -332,7 +332,7 @@ def get_guild_channels(guild_id: str):
         for ch in channels
         if ch.get("type") == 0
     ]
-    return {"channels": text_channels}
+    return text_channels
 
 # -----------------------------
 # Image generation

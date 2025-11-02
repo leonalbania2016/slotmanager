@@ -275,33 +275,41 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             for frame in reader:
                 img = Image.fromarray(frame).convert("RGBA")
 
-                # create a text layer for antialiasing
-                text_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
+                upscale_factor = 2
+                img_large = img.resize(
+                    (img.width * upscale_factor, img.height * upscale_factor),
+                    resample=Image.Resampling.LANCZOS
+                )
+
+                text_layer = Image.new("RGBA", img_large.size, (255, 255, 255, 0))
                 draw = ImageDraw.Draw(text_layer)
                 font_path = os.path.join("fonts", s.font_family or "arial.ttf")
-                font = ImageFont.truetype(font_path, s.font_size or 64)
+                font = ImageFont.truetype(font_path, (s.font_size or 64) * upscale_factor)
 
                 bbox = draw.textbbox((0, 0), text, font=font)
                 text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                x = (img.width - text_w) / 2
-                y = s.padding_top or (img.height // 2 - text_h // 2)
+                x = (img_large.width - text_w) / 2
+                y = s.padding_top * upscale_factor if s.padding_top else (img_large.height // 2 - text_h // 2)
 
-                # ✨ soft glow for readability
-                for radius in range(2, 5):
-                    draw.text((x, y), text, font=font, fill=(0, 0, 0, 60 // radius))
+                avg_brightness = np.array(img).mean()
+                text_fill = "#FFFFFF" if avg_brightness < 130 else "#000000"
 
-                # main text
-                draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
+                for dx in range(-4, 5, 2):
+                    for dy in range(-4, 5, 2):
+                        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 120))
 
-                # merge text with original frame
-                img = Image.alpha_composite(img, text_layer)
-                new_frames.append(np.array(img))
+                draw.text((x, y), text, font=font, fill=text_fill)
 
-            # save final animated GIF
+                merged = Image.alpha_composite(img_large, text_layer)
+                merged = merged.resize(img.size, resample=Image.Resampling.LANCZOS)
+                new_frames.append(np.array(merged))
+
             out_gif = io.BytesIO()
             imageio.mimsave(out_gif, new_frames, format="GIF", loop=0, duration=duration)
             out_gif.seek(0)
             files = {"file": ("slot.gif", out_gif, "image/gif")}
+
+
 
         else:
             img = Image.open(bg_bytes).convert("RGBA")
@@ -327,24 +335,28 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             out_img.seek(0)
             files = {"file": ("slot.png", out_img, "image/png")}
 
-        # Upload to Discord
+        # upload to Discord
         upload = httpx.post(
             f"https://discord.com/api/v10/channels/{channel_id}/messages",
             headers=headers,
             files=files
         )
 
-        # handle rate limits gracefully
+        # handle rate limits gracefully (must be inside the loop)
         if upload.status_code == 429:
             retry_after = upload.json().get("retry_after", 2)
             print(f"Rate-limited! Waiting {retry_after}s…")
             time.sleep(retry_after)
-            continue
+            continue  # ✅ works because we're inside the for-loop
 
         upload.raise_for_status()
+
+        # ✅ prevent hitting Discord’s 5 msgs/sec limit
         time.sleep(1)
 
+    # end of loop
     return {"status": "sent"}
+
 
 from fastapi import Body
 

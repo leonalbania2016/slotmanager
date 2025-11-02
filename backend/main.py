@@ -265,7 +265,8 @@ def send_slots(guild_id: str, payload: dict = Body(...)):
 
         # Center text
         img_w, img_h = img.size
-        text_w, text_h = draw.textsize(text, font=font)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
         x = (img_w - text_w) / 2
         y = padding_top
 

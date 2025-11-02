@@ -231,8 +231,12 @@ class SendSlotsBody(BaseModel):
 def send_slots(guild_id: str, body: SendSlotsBody):
     """
     Sends each slot as an image (or animated GIF) to a Discord channel.
-    Supports font color, padding, and glowing text on animated backgrounds.
+    High-quality rendering with smooth text overlay and shadow glow.
     """
+    import numpy as np
+    import time
+    import os
+
     channel_id = body.channel_id
     headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
 
@@ -255,20 +259,25 @@ def send_slots(guild_id: str, body: SendSlotsBody):
         tag = f" ({s.teamtag})" if s.teamtag else ""
         text = f"#{s.slot_number}: {teamname}{tag}"
 
-        # download background
+        # Download background
         r = httpx.get(bg_url)
         r.raise_for_status()
         bg_bytes = io.BytesIO(r.content)
-
         content_type = r.headers.get("Content-Type", "").lower()
 
-        # 🧠 Detect GIFs by MIME type instead of .gif ending
+        # 🧠 Detect GIFs by MIME type instead of file extension
         if "gif" in content_type:
-            frames = imageio.mimread(bg_bytes, memtest=False)
+            reader = imageio.get_reader(bg_bytes, format="GIF")
+            meta = reader.get_meta_data()
+            duration = meta.get("duration", 80) / 1000.0
             new_frames = []
-            for frame in frames:
+
+            for frame in reader:
                 img = Image.fromarray(frame).convert("RGBA")
-                draw = ImageDraw.Draw(img)
+
+                # create a text layer for antialiasing
+                text_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
+                draw = ImageDraw.Draw(text_layer)
                 font_path = os.path.join("fonts", s.font_family or "arial.ttf")
                 font = ImageFont.truetype(font_path, s.font_size or 64)
 
@@ -277,24 +286,27 @@ def send_slots(guild_id: str, body: SendSlotsBody):
                 x = (img.width - text_w) / 2
                 y = s.padding_top or (img.height // 2 - text_h // 2)
 
-                # ✨ Draw shadow glow for readability
-                shadow_color = "black"
-                for dx in range(-2, 3):
-                    for dy in range(-2, 3):
-                        draw.text((x + dx, y + dy), text, font=font, fill=shadow_color)
+                # ✨ soft glow for readability
+                for radius in range(2, 5):
+                    draw.text((x, y), text, font=font, fill=(0, 0, 0, 60 // radius))
 
+                # main text
                 draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
 
+                # merge text with original frame
+                img = Image.alpha_composite(img, text_layer)
                 new_frames.append(np.array(img))
 
+            # save final animated GIF
             out_gif = io.BytesIO()
-            imageio.mimsave(out_gif, new_frames, format="GIF", loop=0, duration=0.08)
+            imageio.mimsave(out_gif, new_frames, format="GIF", loop=0, duration=duration)
             out_gif.seek(0)
             files = {"file": ("slot.gif", out_gif, "image/gif")}
 
         else:
             img = Image.open(bg_bytes).convert("RGBA")
-            draw = ImageDraw.Draw(img)
+            text_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
+            draw = ImageDraw.Draw(text_layer)
             font_path = os.path.join("fonts", s.font_family or "arial.ttf")
             font = ImageFont.truetype(font_path, s.font_size or 64)
 
@@ -303,26 +315,26 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             x = (img.width - text_w) / 2
             y = s.padding_top or (img.height // 2 - text_h // 2)
 
-            # ✨ Text shadow for visibility
-            for dx in range(-2, 3):
-                for dy in range(-2, 3):
-                    draw.text((x + dx, y + dy), text, font=font, fill="black")
+            # ✨ soft shadow
+            for radius in range(2, 5):
+                draw.text((x, y), text, font=font, fill=(0, 0, 0, 60 // radius))
 
             draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
+            img = Image.alpha_composite(img, text_layer)
 
             out_img = io.BytesIO()
             img.save(out_img, format="PNG")
             out_img.seek(0)
             files = {"file": ("slot.png", out_img, "image/png")}
 
-        # upload to Discord
+        # Upload to Discord
         upload = httpx.post(
             f"https://discord.com/api/v10/channels/{channel_id}/messages",
             headers=headers,
             files=files
         )
 
-        # handle rate limits
+        # handle rate limits gracefully
         if upload.status_code == 429:
             retry_after = upload.json().get("retry_after", 2)
             print(f"Rate-limited! Waiting {retry_after}s…")
@@ -333,8 +345,6 @@ def send_slots(guild_id: str, body: SendSlotsBody):
         time.sleep(1)
 
     return {"status": "sent"}
-
-
 
 from fastapi import Body
 

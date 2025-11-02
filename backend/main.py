@@ -275,41 +275,42 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             for frame in reader:
                 img = Image.fromarray(frame).convert("RGBA")
 
-                upscale_factor = 2
-                img_large = img.resize(
-                    (img.width * upscale_factor, img.height * upscale_factor),
-                    resample=Image.Resampling.LANCZOS
-                )
+                # upscale for sharper text, then downscale
+                upscale = 2
+                large = img.resize((img.width * upscale, img.height * upscale), Image.Resampling.LANCZOS)
 
-                text_layer = Image.new("RGBA", img_large.size, (255, 255, 255, 0))
+                text_layer = Image.new("RGBA", large.size, (0, 0, 0, 0))
                 draw = ImageDraw.Draw(text_layer)
                 font_path = os.path.join("fonts", s.font_family or "arial.ttf")
-                font = ImageFont.truetype(font_path, (s.font_size or 64) * upscale_factor)
+                font = ImageFont.truetype(font_path, (s.font_size or 64) * upscale)
 
                 bbox = draw.textbbox((0, 0), text, font=font)
                 text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                x = (img_large.width - text_w) / 2
-                y = s.padding_top * upscale_factor if s.padding_top else (img_large.height // 2 - text_h // 2)
+                x = (large.width - text_w) / 2
+                y = s.padding_top * upscale if s.padding_top else (large.height // 2 - text_h // 2)
 
-                avg_brightness = np.array(img).mean()
-                text_fill = "#FFFFFF" if avg_brightness < 130 else "#000000"
+                # shadow for contrast
+                for dx in range(-3, 4):
+                    for dy in range(-3, 4):
+                        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 160))
+                draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
 
-                for dx in range(-4, 5, 2):
-                    for dy in range(-4, 5, 2):
-                        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 120))
-
-                draw.text((x, y), text, font=font, fill=text_fill)
-
-                merged = Image.alpha_composite(img_large, text_layer)
-                merged = merged.resize(img.size, resample=Image.Resampling.LANCZOS)
-                new_frames.append(np.array(merged))
+                combined = Image.alpha_composite(large, text_layer)
+                final = combined.resize(img.size, Image.Resampling.LANCZOS)
+                new_frames.append(np.array(final))
 
             out_gif = io.BytesIO()
-            imageio.mimsave(out_gif, new_frames, format="GIF", loop=0, duration=duration)
+            imageio.mimsave(
+                out_gif,
+                new_frames,
+                format="GIF",
+                loop=0,
+                duration=duration,
+                palettesize=256,
+                subrectangles=True
+            )
             out_gif.seek(0)
             files = {"file": ("slot.gif", out_gif, "image/gif")}
-
-
 
         else:
             img = Image.open(bg_bytes).convert("RGBA")
@@ -323,11 +324,12 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             x = (img.width - text_w) / 2
             y = s.padding_top or (img.height // 2 - text_h // 2)
 
-            # ✨ soft shadow
-            for radius in range(2, 5):
-                draw.text((x, y), text, font=font, fill=(0, 0, 0, 60 // radius))
-
+            # soft shadow
+            for dx in range(-3, 4):
+                for dy in range(-3, 4):
+                    draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, 100))
             draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
+
             img = Image.alpha_composite(img, text_layer)
 
             out_img = io.BytesIO()
@@ -356,7 +358,6 @@ def send_slots(guild_id: str, body: SendSlotsBody):
 
     # end of loop
     return {"status": "sent"}
-
 
 from fastapi import Body
 

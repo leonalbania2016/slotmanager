@@ -9,7 +9,7 @@ from fastapi import Body
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 from urllib.parse import urlencode
-
+import time
 import jwt
 import httpx
 import cloudinary
@@ -219,27 +219,21 @@ def list_slots(guild_id: str):
             for s in slots
         ]
 from fastapi import Body, HTTPException
+from pydantic import BaseModel
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
-import httpx
-
-import imageio
-from PIL import Image, ImageDraw, ImageFont
-import io
-
-from pydantic import BaseModel
+import httpx, io, os, time, imageio, numpy as np
 
 class SendSlotsBody(BaseModel):
     channel_id: str
 
 @app.post("/api/guilds/{guild_id}/send_slots")
 def send_slots(guild_id: str, body: SendSlotsBody):
+    """
+    Sends each slot as an image (or animated GIF) to a Discord channel.
+    """
     channel_id = body.channel_id
-    """
-    Sends the slot list as images to a Discord channel.
-    Keeps GIF animation if the background is animated.
-    """
-    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
 
     with get_db() as db:
         slots = db.query(Slot).filter(Slot.guild_id == guild_id).order_by(Slot.slot_number).all()
@@ -247,7 +241,6 @@ def send_slots(guild_id: str, body: SendSlotsBody):
     if not slots:
         raise HTTPException(status_code=404, detail="No slots found for this guild")
 
-    # Default background (still or animated)
     DEFAULT_BACKGROUND_URL = "https://cdn.discordapp.com/attachments/xxxx/slot_bg.gif"
 
     for s in slots:
@@ -256,12 +249,12 @@ def send_slots(guild_id: str, body: SendSlotsBody):
         tag = f" ({s.teamtag})" if s.teamtag else ""
         text = f"#{s.slot_number}: {teamname}{tag}"
 
-        # Download background
+        # download background
         r = httpx.get(bg_url)
         r.raise_for_status()
         bg_bytes = io.BytesIO(r.content)
 
-        # 🧠 Detect GIFs
+        # 🧠 handle GIFs vs static images
         if bg_url.lower().endswith(".gif"):
             frames = imageio.mimread(bg_bytes, memtest=False)
             new_frames = []
@@ -277,7 +270,6 @@ def send_slots(guild_id: str, body: SendSlotsBody):
                 draw.text((x, y), text, font=font, fill=s.font_color or "#FFFFFF")
                 new_frames.append(np.array(img))
 
-            # Save as animated GIF again
             out_gif = io.BytesIO()
             imageio.mimsave(out_gif, new_frames, format="GIF", loop=0, duration=0.08)
             out_gif.seek(0)
@@ -298,15 +290,27 @@ def send_slots(guild_id: str, body: SendSlotsBody):
             out_img.seek(0)
             files = {"file": ("slot.png", out_img, "image/png")}
 
-        # Upload to Discord
+        # upload to Discord
         upload = httpx.post(
             f"https://discord.com/api/v10/channels/{channel_id}/messages",
-            headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}"},
+            headers=headers,
             files=files
         )
+
+        # if Discord rate-limits, wait & retry
+        if upload.status_code == 429:
+            retry_after = upload.json().get("retry_after", 2)
+            print(f"Rate-limited! Waiting {retry_after} seconds...")
+            time.sleep(retry_after)
+            continue  # skip or resend next slot
+
         upload.raise_for_status()
 
+        # ✅ prevent hitting rate limits
+        time.sleep(1)
+
     return {"status": "sent"}
+
 
 from fastapi import Body
 

@@ -135,25 +135,39 @@ useEffect(() => {
               </option>
             ))}
           </select>
-          <button
-  onClick={() => {
-    if (!selectedChannel) return alert("Please select a channel first!");
-    fetch(`${API_URL}/api/guilds/${guild_id}/send_slots`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel_id: selectedChannel }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.status === "sent") alert("✅ Slots sent successfully!");
-        else alert("❌ Failed to send slots.");
-      })
-      .catch((err) => {
-        console.error("Failed to send slots:", err);
-        alert("❌ Error sending slots.");
+<button
+  onClick={async () => {
+    if (!selectedChannel) {
+      alert("⚠️ Please select a Discord channel first!");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/api/guilds/${guild_id}/send_slots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: selectedChannel }),
       });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Backend error:", errorText);
+        alert("❌ Failed to send slots — check backend logs for details.");
+        return;
+      }
+
+      const data = await res.json();
+      if (data.status === "success" || data.status === "sent") {
+        alert("✅ Slots sent successfully!");
+      } else {
+        alert("❌ Failed to send slots.");
+      }
+    } catch (err) {
+      console.error("Failed to send slots:", err);
+      alert("❌ Network error while sending slots.");
+    }
   }}
-  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-2"
+  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-2 transition"
 >
   📤 Send Slots to Discord
 </button>

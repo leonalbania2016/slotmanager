@@ -382,8 +382,8 @@ def send_slots(guild_id: str, body: SendSlotsBody):
     # 🔁 Generate and send each slot image/GIF
     for s in slots:
         teamname = s.teamname or "Unassigned"
-        tag = f" ({s.teamtag})" if s.teamtag else ""
-        text = f"#{s.slot_number}: {teamname}{tag}"
+        tag = f" {s.teamtag}" if s.teamtag else ""
+        text = f"{s.slot_number} - {teamname} - {tag}"
 
         font_family = s.font_family or "arial.ttf"
         font_size = s.font_size or 64

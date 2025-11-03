@@ -102,8 +102,9 @@ def _draw_text_with_glow(
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-    x = (large.width - tw) // 2
+    x = 80  # left padding (adjust as you like)
     y_px = y * upscale if y is not None else (large.height - th) // 2
+
 
     # soft shadow/glow
     shadow = Image.new("RGBA", large.size, (0, 0, 0, 0))

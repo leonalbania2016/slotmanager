@@ -211,7 +211,7 @@ export default function Dashboard() {
             <h3 className="bg-gray-800 p-4 rounded-lg shadow hover:bg-gray-700 transition text-left items-start justify-start">
               {slot.slot_number}{" "}
               <span className="text-sm text-gray-400">
-                {slot.teamname || "Unassigned"}
+                {slot.teamname || "FreeSlot"}
               </span>
             </h3>
 

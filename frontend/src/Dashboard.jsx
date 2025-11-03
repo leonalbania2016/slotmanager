@@ -208,8 +208,8 @@ export default function Dashboard() {
             key={slot.slot_number}
             className="bg-gray-800 p-4 rounded-lg shadow hover:bg-gray-700 transition"
           >
-            <h3 className="font-semibold text-lg mb-2">
-              #{slot.slot_number}{" "}
+            <h3 className="bg-gray-800 p-4 rounded-lg shadow hover:bg-gray-700 transition text-left items-start justify-start">
+              {slot.slot_number}{" "}
               <span className="text-sm text-gray-400">
                 {slot.teamname || "Unassigned"}
               </span>

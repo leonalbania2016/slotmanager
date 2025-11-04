@@ -27,11 +27,18 @@ function Home() {
         return res.json();
       })
       .then((data) => {
-        if (data.guilds) setGuilds(data.guilds);
+        if (data.user) {
+          if (data.user.id) localStorage.setItem("user_id", data.user.id);
+          if (data.user.username) localStorage.setItem("username", data.user.username);
+        }
+        if (Array.isArray(data.guilds)) setGuilds(data.guilds);
       })
       .catch((err) => console.error("Decode error:", err))
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        setLoading(false);
+        navigate("/", { replace: true });
+      });
+  }, [API_URL, navigate]);
 
   const handleLogin = () => {
     const params = new URLSearchParams({
@@ -57,15 +64,20 @@ function Home() {
   }
 
   if (!guilds.length) {
+    const username = localStorage.getItem("username");
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-white">
         <h1 className="text-3xl mb-6 font-bold">Slot Manager</h1>
-        <button
-          onClick={handleLogin}
-          className="bg-indigo-600 px-6 py-3 rounded-lg text-lg hover:bg-indigo-500 transition"
-        >
-          Login with Discord
-        </button>
+        {username ? (
+          <p className="text-lg text-gray-300">No servers available for this account.</p>
+        ) : (
+          <button
+            onClick={handleLogin}
+            className="bg-indigo-600 px-6 py-3 rounded-lg text-lg hover:bg-indigo-500 transition"
+          >
+            Login with Discord
+          </button>
+        )}
       </div>
     );
   }

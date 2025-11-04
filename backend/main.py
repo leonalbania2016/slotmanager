@@ -2,9 +2,11 @@ import os
 import io
 import time
 import json
+import base64
 import httpx
 import imageio
 import numpy as np
+from urllib.parse import quote
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -281,9 +283,49 @@ def auth_callback(code: str):
 
     print(f"✅ Logged in: {username} ({user_id})")
 
-    # Redirect user to frontend dashboard
-    redirect_url = f"{FRONTEND_URL}/dashboard?user_id={user_id}&username={username}"
+    # Fetch guilds for server selection
+    guilds_resp = requests.get(
+        "https://discord.com/api/users/@me/guilds",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    if guilds_resp.status_code != 200:
+        print("Failed to fetch guilds:", guilds_resp.text)
+        return RedirectResponse(url=f"{FRONTEND_URL}/error?reason=guilds_fetch_failed")
+
+    guilds_raw = guilds_resp.json()
+    guilds = [
+        {
+            "id": g.get("id"),
+            "name": g.get("name"),
+            "icon": g.get("icon"),
+        }
+        for g in guilds_raw
+        if g.get("id") and g.get("name")
+    ]
+
+    session_payload = {
+        "user": {"id": user_id, "username": username},
+        "guilds": guilds,
+        "created_at": time.time(),
+    }
+
+    encoded = base64.urlsafe_b64encode(json.dumps(session_payload).encode()).decode()
+    redirect_url = f"{FRONTEND_URL}/?session={quote(encoded)}"
     return RedirectResponse(url=redirect_url)
+
+
+@app.get("/api/decode")
+def decode_session(session: str):
+    try:
+        padded = session + "=" * (-len(session) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode()).decode()
+        data = json.loads(decoded)
+        if not isinstance(data, dict):
+            raise ValueError("Session payload must be an object")
+        return data
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid session token")
 # ---------------------------------------------------------------------------
 # Root Endpoint
 # ---------------------------------------------------------------------------

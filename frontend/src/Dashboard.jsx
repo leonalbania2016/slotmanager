@@ -6,8 +6,8 @@ export default function Dashboard() {
   const [slots, setSlots] = useState([]);
   const [backgroundUrl, setBackgroundUrl] = useState("");
   const [channels, setChannels] = useState([]);
-  const [gifs, setGifs] = useState([]); // new: available gif list
-  const [selectedGif, setSelectedGif] = useState(""); // new: chosen gif
+  const [gifs, setGifs] = useState([]);
+  const [selectedGif, setSelectedGif] = useState("");
   const [selectedChannel, setSelectedChannel] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -15,7 +15,7 @@ export default function Dashboard() {
 
   console.log("Dashboard loaded for guild:", guild_id);
 
-  // Fetch slots for this guild
+  // Load slots
   useEffect(() => {
     if (!guild_id) return;
     fetch(`${API_URL}/api/guilds/${guild_id}/slots`)
@@ -29,43 +29,37 @@ export default function Dashboard() {
       .catch((err) => console.error("Error loading slots:", err));
   }, [guild_id]);
 
-  // Fetch all channels for this guild
+  // Load channels
   useEffect(() => {
     if (!guild_id) return;
     fetch(`${API_URL}/api/guilds/${guild_id}/channels`)
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data)) {
-          setChannels(data);
-        } else if (data.channels && Array.isArray(data.channels)) {
+        if (Array.isArray(data)) setChannels(data);
+        else if (data.channels && Array.isArray(data.channels))
           setChannels(data.channels);
-        } else {
-          console.warn("Unexpected channels response:", data);
-        }
       })
       .catch((err) => console.error("Failed to load channels:", err));
   }, [guild_id]);
 
-  // 🔹 Fetch available local GIFs from backend
+  // Load available GIFs
   useEffect(() => {
     fetch(`${API_URL}/api/gifs`)
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data.gifs)) {
-          setGifs(data.gifs);
-        }
+        if (Array.isArray(data.gifs)) setGifs(data.gifs);
       })
       .catch((err) => console.error("Error loading GIFs:", err));
   }, []);
 
-  // Update slot values locally
+  // Update slot locally
   const updateSlot = (index, key, value) => {
     const updated = [...slots];
     updated[index][key] = value;
     setSlots(updated);
   };
 
-  // Save single slot to backend
+  // Save one slot
   const saveSlot = async (slot) => {
     if (!selectedChannel) {
       alert("Please select a Discord channel first!");
@@ -90,7 +84,7 @@ export default function Dashboard() {
       );
 
       if (!res.ok) throw new Error("Save failed");
-      console.log(`Slot #${slot.slot_number} saved successfully.`);
+      console.log(`✅ Slot #${slot.slot_number} saved successfully.`);
     } catch (err) {
       console.error(err);
       alert("❌ Failed to save slot");
@@ -99,20 +93,7 @@ export default function Dashboard() {
     }
   };
 
-  // Save all slots
-  const saveAll = async () => {
-    if (!selectedChannel) {
-      alert("Please select a Discord channel first!");
-      return;
-    }
-
-    for (const slot of slots) {
-      await saveSlot(slot);
-    }
-    alert("✅ All slots saved successfully!");
-  };
-
-  // 🔹 Send slots to Discord with chosen GIF
+  // Send all slots to Discord
   const sendSlots = async () => {
     if (!selectedChannel) {
       alert("⚠️ Please select a Discord channel first!");
@@ -150,15 +131,18 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
-      <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
-      <p className="mb-6 text-gray-400">Guild ID: {guild_id}</p>
+      <h1 className="text-3xl font-bold mb-2 text-left">Dashboard</h1>
+      <p className="mb-6 text-gray-400 text-left">Guild ID: {guild_id}</p>
 
+      {/* Global Controls */}
       <div className="mb-8 bg-gray-800 p-4 rounded-lg">
         <h2 className="text-xl font-semibold mb-2">Global Settings</h2>
 
         {/* GIF Selector */}
         <div className="mb-4">
-          <label className="block mb-2 font-semibold">Select Background GIF:</label>
+          <label className="block mb-2 font-semibold text-left">
+            Select Background GIF:
+          </label>
           <select
             value={selectedGif}
             onChange={(e) => setSelectedGif(e.target.value)}
@@ -173,9 +157,9 @@ export default function Dashboard() {
           </select>
         </div>
 
-        {/* Channel Dropdown */}
+        {/* Channel Selector */}
         <div className="mb-3">
-          <label className="block mb-2 font-semibold">
+          <label className="block mb-2 font-semibold text-left">
             Select Discord Channel:
           </label>
           <select
@@ -191,46 +175,46 @@ export default function Dashboard() {
             ))}
           </select>
 
-          {/* Send Slots */}
+          {/* Send Slots Button */}
           <button
             onClick={sendSlots}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-3 transition"
+            className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-3 transition w-full"
           >
             📤 Send Slots to Discord
           </button>
         </div>
       </div>
 
-      <h2 className="text-xl mb-4 font-semibold">Slots</h2>
+      {/* Slot List */}
+      <h2 className="text-xl mb-4 font-semibold text-left">Slots</h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {slots.map((slot, index) => (
           <div
             key={slot.slot_number}
-            className="bg-gray-800 p-4 rounded-lg shadow hover:bg-gray-700 transition"
+            className="bg-gray-800 p-4 rounded-lg shadow hover:bg-gray-700 transition text-left"
           >
-            <h3 className="bg-gray-800 p-4 rounded-lg shadow hover:bg-gray-700 transition text-left items-start justify-start">
+            <h3 className="text-lg font-bold mb-2 text-left">
               {slot.slot_number}{" "}
               <span className="text-sm text-gray-400">
-                {slot.teamname || "FreeSlot"}
+                {slot.teamname || "FreeSlot"} {slot.teamtag || ""}
               </span>
             </h3>
 
             <input
-              className="w-full bg-gray-700 rounded p-2 mb-2"
+              className="w-full bg-gray-700 rounded p-2 mb-2 text-left"
               placeholder="Team Name"
               value={slot.teamname || ""}
               onChange={(e) => updateSlot(index, "teamname", e.target.value)}
             />
             <input
-              className="w-full bg-gray-700 rounded p-2 mb-2"
+              className="w-full bg-gray-700 rounded p-2 mb-2 text-left"
               placeholder="Team Tag"
               value={slot.teamtag || ""}
               onChange={(e) => updateSlot(index, "teamtag", e.target.value)}
             />
 
-            {/* Emoji dropdown (Yes / No only) */}
             <select
-              className="w-full bg-gray-700 rounded p-2 mb-2"
+              className="w-full bg-gray-700 rounded p-2 mb-2 text-left"
               value={slot.emoji || ""}
               onChange={(e) => updateSlot(index, "emoji", e.target.value)}
             >
@@ -242,21 +226,13 @@ export default function Dashboard() {
             <button
               onClick={() => saveSlot(slot)}
               disabled={saving}
-              className="bg-indigo-600 px-4 py-2 rounded mt-2 w-full hover:bg-indigo-500 transition"
+              className="bg-blue-600 px-4 py-2 rounded mt-2 w-full hover:bg-blue-500 transition"
             >
               {saving ? "Saving..." : "Save Slot"}
             </button>
           </div>
         ))}
       </div>
-
-      <button
-        onClick={saveAll}
-        disabled={saving}
-        className="mt-8 bg-green-600 px-6 py-3 rounded-lg hover:bg-green-500 transition"
-      >
-        {saving ? "Saving..." : "Save All Slots"}
-      </button>
     </div>
   );
 }

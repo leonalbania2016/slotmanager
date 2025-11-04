@@ -1,18 +1,29 @@
 import os
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, String
 
-
+# ---------------------------------------------------------------------------
+# Database URL — defaults to local SQLite if not set
+# ---------------------------------------------------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# ---------------------------------------------------------------------------
+# SQLAlchemy setup
+# ---------------------------------------------------------------------------
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
-
+# ---------------------------------------------------------------------------
+# Slot Model
+# ---------------------------------------------------------------------------
 class Slot(Base):
     __tablename__ = "slots"
+
     id = Column(Integer, primary_key=True, index=True)
     guild_id = Column(String, index=True)
     slot_number = Column(Integer, index=True)
@@ -26,22 +37,33 @@ class Slot(Base):
     font_color = Column(String, default="#FFFFFF")
     padding_top = Column(Integer, default=0)
     padding_bottom = Column(Integer, default=0)
+
+    # Discord persistence fields
     discord_message_id = Column(String, nullable=True)
     discord_channel_id = Column(String, nullable=True)
 
-
+# ---------------------------------------------------------------------------
+# Guild Configuration (per guild)
+# ---------------------------------------------------------------------------
 class GuildConfig(Base):
     __tablename__ = "guildconfigs"
+
     id = Column(Integer, primary_key=True, index=True)
     guild_id = Column(String, unique=True, index=True)
     channel_id = Column(String, default="")
 
-
-# ✅ Add this helper at the bottom
+# ---------------------------------------------------------------------------
+# DB session helper
+# ---------------------------------------------------------------------------
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+# ---------------------------------------------------------------------------
+# Initialize tables
+# ---------------------------------------------------------------------------
 Base.metadata.create_all(bind=engine)
+print("✅ Database tables created or verified.")

@@ -19,6 +19,11 @@ from models import Base, engine, get_db, Slot
 app = FastAPI(title="Slot Manager Backend")
 
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://slotmanager-frontend.onrender.com")
+REDIRECT_URI = os.getenv("REDIRECT_URI", "https://slotmanager-backend.onrender.com/auth/callback")
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GIFS_DIR = os.path.join(os.path.dirname(__file__), "assets", "gifs")
 os.makedirs(GIFS_DIR, exist_ok=True)
 DEFAULT_GIF_NAME = "default.gif"

@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation, useNavigate } from "react-router-dom";
+
+// helper for parsing ?user_id=...&username=...
+function useQuery() {
+  return new URLSearchParams(useLocation().search);
+}
 
 export default function Dashboard() {
   const { guild_id } = useParams();
@@ -12,10 +17,32 @@ export default function Dashboard() {
   const [saving, setSaving] = useState(false);
 
   const API_URL = "https://slotmanager-backend.onrender.com";
+  const query = useQuery();
+  const navigate = useNavigate();
 
-  console.log("Dashboard loaded for guild:", guild_id);
+  // 🧩 Handle login redirect from Discord
+  useEffect(() => {
+    const userId = query.get("user_id");
+    const username = query.get("username");
 
-  // Load slots
+    if (userId && username) {
+      console.log("✅ Logged in as:", username);
+      localStorage.setItem("user_id", userId);
+      localStorage.setItem("username", username);
+      // Clean up the URL
+      navigate("/dashboard", { replace: true });
+    }
+  }, []);
+
+  // 🧠 Redirect to login if not logged in
+  useEffect(() => {
+    const userId = localStorage.getItem("user_id");
+    if (!userId) {
+      navigate("/login");
+    }
+  }, []);
+
+  // 🎯 Load slots
   useEffect(() => {
     if (!guild_id) return;
     fetch(`${API_URL}/api/guilds/${guild_id}/slots`)
@@ -29,7 +56,7 @@ export default function Dashboard() {
       .catch((err) => console.error("Error loading slots:", err));
   }, [guild_id]);
 
-  // Load channels
+  // 💬 Load channels
   useEffect(() => {
     if (!guild_id) return;
     fetch(`${API_URL}/api/guilds/${guild_id}/channels`)
@@ -42,7 +69,7 @@ export default function Dashboard() {
       .catch((err) => console.error("Failed to load channels:", err));
   }, [guild_id]);
 
-  // Load available GIFs
+  // 🎞️ Load available GIFs
   useEffect(() => {
     fetch(`${API_URL}/api/gifs`)
       .then((res) => res.json())
@@ -52,14 +79,14 @@ export default function Dashboard() {
       .catch((err) => console.error("Error loading GIFs:", err));
   }, []);
 
-  // Update slot locally
+  // ✏️ Update slot locally
   const updateSlot = (index, key, value) => {
     const updated = [...slots];
     updated[index][key] = value;
     setSlots(updated);
   };
 
-  // Save one slot
+  // 💾 Save one slot
   const saveSlot = async (slot) => {
     if (!selectedChannel) {
       alert("Please select a Discord channel first!");
@@ -93,7 +120,7 @@ export default function Dashboard() {
     }
   };
 
-  // Send all slots to Discord
+  // 🚀 Send all slots to Discord
   const sendSlots = async () => {
     if (!selectedChannel) {
       alert("⚠️ Please select a Discord channel first!");
@@ -129,12 +156,18 @@ export default function Dashboard() {
     }
   };
 
+  // 🧭 Logged-in user display
+  const username = localStorage.getItem("username") || "Guest";
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <h1 className="text-3xl font-bold mb-2 text-left">Dashboard</h1>
+      <p className="mb-6 text-gray-400 text-left">
+        Welcome, <span className="font-semibold">{username}</span> 👋
+      </p>
       <p className="mb-6 text-gray-400 text-left">Guild ID: {guild_id}</p>
 
-      {/* Global Controls */}
+      {/* 🌍 Global Controls */}
       <div className="mb-8 bg-gray-800 p-4 rounded-lg">
         <h2 className="text-xl font-semibold mb-2">Global Settings</h2>
 
@@ -175,7 +208,6 @@ export default function Dashboard() {
             ))}
           </select>
 
-          {/* Send Slots Button */}
           <button
             onClick={sendSlots}
             className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-3 transition w-full"
@@ -185,7 +217,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Slot List */}
+      {/* 🧩 Slot List */}
       <h2 className="text-xl mb-4 font-semibold text-left">Slots</h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {slots.map((slot, index) => (

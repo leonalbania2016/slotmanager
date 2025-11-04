@@ -228,7 +228,62 @@ def send_slots(guild_id: str, body: SendSlotsBody):
         time.sleep(0.4)
 
     return {"status": "sent"}
+from fastapi.responses import RedirectResponse
+import requests
+import os
 
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+DISCORD_REDIRECT_URI = os.getenv(
+    "DISCORD_REDIRECT_URI", "https://slotmanager-backend.onrender.com/auth/callback"
+)
+FRONTEND_URL = "https://slotmanager-frontend.onrender.com"  # Change this if your React app uses a different domain
+
+
+@app.get("/auth/callback")
+def auth_callback(code: str):
+    """
+    Handles Discord OAuth2 callback and redirects user back to frontend.
+    """
+
+    # Exchange the code for an access token
+    data = {
+        "client_id": DISCORD_CLIENT_ID,
+        "client_secret": DISCORD_CLIENT_SECRET,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": DISCORD_REDIRECT_URI,
+    }
+
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    token_resp = requests.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
+
+    if token_resp.status_code != 200:
+        print("OAuth token exchange failed:", token_resp.text)
+        return RedirectResponse(url=f"{FRONTEND_URL}/error?reason=token_exchange_failed")
+
+    tokens = token_resp.json()
+    access_token = tokens.get("access_token")
+
+    # Fetch user info
+    user_resp = requests.get(
+        "https://discord.com/api/users/@me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    if user_resp.status_code != 200:
+        print("Failed to fetch user info:", user_resp.text)
+        return RedirectResponse(url=f"{FRONTEND_URL}/error?reason=user_info_failed")
+
+    user = user_resp.json()
+    username = user.get("username")
+    user_id = user.get("id")
+
+    print(f"✅ Logged in: {username} ({user_id})")
+
+    # Redirect user to frontend dashboard
+    redirect_url = f"{FRONTEND_URL}/dashboard?user_id={user_id}&username={username}"
+    return RedirectResponse(url=redirect_url)
 # ---------------------------------------------------------------------------
 # Root Endpoint
 # ---------------------------------------------------------------------------

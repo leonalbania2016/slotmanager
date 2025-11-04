@@ -1,6 +1,8 @@
 import os
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import Column, String
+
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 
@@ -24,6 +26,8 @@ class Slot(Base):
     font_color = Column(String, default="#FFFFFF")
     padding_top = Column(Integer, default=0)
     padding_bottom = Column(Integer, default=0)
+    discord_message_id = Column(String, nullable=True)
+    discord_channel_id = Column(String, nullable=True)
 
 
 class GuildConfig(Base):
@@ -40,3 +44,4 @@ def get_db():
         yield db
     finally:
         db.close()
+Base.metadata.create_all(bind=engine)

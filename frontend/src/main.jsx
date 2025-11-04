@@ -8,10 +8,10 @@ import "./index.css"
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter>
-      <Routes>
-        <Route path="/*" element={<App />} />   {/* 👈 note the trailing "/*" */}
-        <Route path="/dashboard/:guild_id" element={<Dashboard />} />
-      </Routes>
+<Routes>
+  <Route path="/*" element={<App />} />
+  <Route path="/dashboard" element={<Dashboard />} />  {/* ✅ fixed path */}
+</Routes>
     </BrowserRouter>
   </React.StrictMode>
 );

@@ -242,45 +242,60 @@ FRONTEND_URL = "https://slotmanager-frontend.onrender.com"  # Change this if you
 
 @app.get("/auth/callback")
 def auth_callback(code: str):
-    # Exchange code for access token
-    token_response = httpx.post(
-        "https://discord.com/api/oauth2/token",
-        data={
-            "client_id": DISCORD_CLIENT_ID,
-            "client_secret": DISCORD_CLIENT_SECRET,
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": REDIRECT_URI,
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    token_json = token_response.json()
-    access_token = token_json.get("access_token")
+    import httpx
+    from fastapi.responses import RedirectResponse
+    from fastapi import HTTPException
 
-    # Fetch user info
+    # 1️⃣ Exchange code for access token
+    token_url = "https://discord.com/api/oauth2/token"
+    data = {
+        "client_id": DISCORD_CLIENT_ID,
+        "client_secret": DISCORD_CLIENT_SECRET,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": REDIRECT_URI,
+    }
+
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+    token_response = httpx.post(token_url, data=data, headers=headers)
+    if token_response.status_code != 200:
+        print("Token error:", token_response.text)
+        raise HTTPException(status_code=400, detail="Failed to get access token")
+
+    access_token = token_response.json().get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Missing access token")
+
+    # 2️⃣ Get user info
     user_data = httpx.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"}
     ).json()
 
-    # Fetch guilds (servers)
-    guilds = httpx.get(
+    user_id = user_data.get("id")
+    username = user_data.get("username")
+
+    # 3️⃣ Get user's guilds
+    guilds_resp = httpx.get(
         "https://discord.com/api/users/@me/guilds",
         headers={"Authorization": f"Bearer {access_token}"}
-    ).json()
+    )
+    if guilds_resp.status_code != 200:
+        print("Guilds error:", guilds_resp.text)
+        raise HTTPException(status_code=400, detail="Failed to fetch guilds")
 
-    # Pick first available guild (you can change this logic)
-    guild_id = guilds[0]["id"] if guilds else None
-    user_id = user_data["id"]
-    username = user_data["username"]
-
-    if not guild_id:
+    guilds = guilds_resp.json()
+    if not guilds:
         raise HTTPException(status_code=400, detail="No accessible guilds found")
 
-    # ✅ Redirect directly to /dashboard/<guild_id>
-    return RedirectResponse(
-        f"{FRONTEND_URL}/dashboard/{guild_id}?user_id={user_id}&username={username}"
-    )
+    guild_id = guilds[0]["id"]  # pick first guild for simplicity
+
+    # 4️⃣ Redirect to frontend dashboard
+    redirect_url = f"{FRONTEND_URL}/dashboard/{guild_id}?user_id={user_id}&username={username}"
+    print("Redirecting to:", redirect_url)
+    return RedirectResponse(url=redirect_url)
+
 
 # ---------------------------------------------------------------------------
 # Root Endpoint

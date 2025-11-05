@@ -196,22 +196,25 @@ def list_gifs():
 
 @app.get("/api/guilds/{guild_id}/channels")
 def list_channels(guild_id: str):
-    """List text channels from Discord for this guild."""
     if not DISCORD_BOT_TOKEN:
         raise HTTPException(status_code=500, detail="DISCORD_BOT_TOKEN not configured")
 
     headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
     url = f"https://discord.com/api/v10/guilds/{guild_id}/channels"
     r = httpx.get(url, headers=headers, timeout=15.0)
-    if r.status_code != 200:
+
+    if r.status_code == 403:
+        raise HTTPException(status_code=403, detail="Bot lacks permission to view channels")
+    elif r.status_code != 200:
         raise HTTPException(status_code=r.status_code, detail=r.text)
 
     channels = [
         {"id": c["id"], "name": c["name"]}
         for c in r.json()
-        if c.get("type") == 0  # text channels only
+        if c.get("type") == 0
     ]
     return {"channels": channels}
+
 
 @app.get("/api/guilds/{guild_id}/slots")
 def list_slots(guild_id: str):

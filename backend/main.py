@@ -165,6 +165,59 @@ class SendSlotsBody(BaseModel):
 # ---------------------------------------------------------------------------
 # Send Slots Endpoint (persistent)
 # ---------------------------------------------------------------------------
+from fastapi import HTTPException
+import os, httpx
+from models import Slot, get_db
+
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+
+@app.get("/api/gifs")
+def list_gifs():
+    """
+    Returns a list of available GIF filenames from assets/gifs/.
+    """
+    gifs_dir = os.path.join(os.path.dirname(__file__), "assets", "gifs")
+    if not os.path.exists(gifs_dir):
+        raise HTTPException(status_code=404, detail="GIF directory not found")
+
+    files = [f for f in os.listdir(gifs_dir) if f.lower().endswith((".gif", ".png", ".jpg", ".jpeg", ".webp"))]
+    return {"gifs": files}
+
+
+@app.get("/api/guilds/{guild_id}/slots")
+def list_slots(guild_id: str):
+    """
+    Lists slots for a given guild.
+    """
+    with get_db() as db:
+        slots = db.query(Slot).filter(Slot.guild_id == guild_id).order_by(Slot.slot_number).all()
+    if not slots:
+        raise HTTPException(status_code=404, detail="No slots found for this guild")
+    return [{"slot_number": s.slot_number, "teamname": s.teamname, "teamtag": s.teamtag} for s in slots]
+
+
+@app.get("/api/guilds/{guild_id}/channels")
+def list_channels(guild_id: str):
+    """
+    Fetches channels from Discord API for the given guild.
+    """
+    if not DISCORD_BOT_TOKEN:
+        raise HTTPException(status_code=500, detail="DISCORD_BOT_TOKEN not configured")
+
+    headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
+    url = f"https://discord.com/api/v10/guilds/{guild_id}/channels"
+
+    r = httpx.get(url, headers=headers, timeout=15.0)
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+
+    channels = [
+        {"id": c["id"], "name": c["name"]}
+        for c in r.json()
+        if c.get("type") == 0  # text channels only
+    ]
+    return {"channels": channels}
+
 @app.post("/api/guilds/{guild_id}/send_slots")
 def send_slots(guild_id: str, body: SendSlotsBody):
     """Send or update each slot as a Discord message with persistent IDs."""

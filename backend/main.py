@@ -27,7 +27,25 @@ DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GIFS_DIR = os.path.join(os.path.dirname(__file__), "assets", "gifs")
 os.makedirs(GIFS_DIR, exist_ok=True)
 DEFAULT_GIF_NAME = "default.gif"
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import os
 
+app = FastAPI()
+
+# ✅ CORS configuration
+origins = [
+    "https://slotmanager-frontend.onrender.com",  # your deployed frontend
+    "http://localhost:5173",  # for local testing
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # ---------------------------------------------------------------------------
 # Database Initialization
 # ---------------------------------------------------------------------------

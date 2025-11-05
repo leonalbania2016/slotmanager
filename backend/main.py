@@ -364,7 +364,7 @@ def auth_callback(code: str):
     if not all([DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, REDIRECT_URI]):
         raise HTTPException(status_code=500, detail="OAuth not configured")
 
-    # 1) token
+    # 1️⃣ Exchange code for token
     token_url = "https://discord.com/api/oauth2/token"
     data = {
         "client_id": DISCORD_CLIENT_ID,
@@ -374,8 +374,8 @@ def auth_callback(code: str):
         "redirect_uri": REDIRECT_URI,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
     token_response = httpx.post(token_url, data=data, headers=headers, timeout=20.0)
+
     if token_response.status_code != 200:
         print("Token error:", token_response.text)
         raise HTTPException(status_code=400, detail="Failed to get access token")
@@ -384,22 +384,20 @@ def auth_callback(code: str):
     if not access_token:
         raise HTTPException(status_code=400, detail="Missing access token")
 
-    # 2) user
+    # 2️⃣ Get user info
     user_data = httpx.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=15.0,
     ).json()
 
-    user_id = user_data.get("id")
-    username = user_data.get("username")
-
-    # 3) guilds
+    # 3️⃣ Get user's guilds
     guilds_resp = httpx.get(
         "https://discord.com/api/users/@me/guilds",
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=15.0,
     )
+
     if guilds_resp.status_code != 200:
         print("Guilds error:", guilds_resp.text)
         raise HTTPException(status_code=400, detail="Failed to fetch guilds")
@@ -408,9 +406,19 @@ def auth_callback(code: str):
     if not guilds:
         raise HTTPException(status_code=400, detail="No accessible guilds found")
 
-    # Pick first guild (you can filter to ADMIN (0x8) if you want)
-    guild_id = guilds[0]["id"]
+    # 4️⃣ Only keep guilds where user has manage rights
+    allowed = [
+        {"id": g["id"], "name": g["name"]}
+        for g in guilds
+        if g.get("permissions", 0) & 0x20  # MANAGE_GUILD
+    ]
 
-    # 4) redirect to frontend
-    redirect_url = f"{FRONTEND_URL}/dashboard/{guild_id}?user_id={user_id}&username={username}"
+    # 5️⃣ Redirect to frontend selection screen
+    encoded = json.dumps(allowed)
+    redirect_url = (
+        f"{FRONTEND_URL}/select-guild?"
+        f"user_id={user_data['id']}&username={user_data['username']}&guilds={encoded}"
+    )
+
+    print("Redirecting to:", redirect_url)
     return RedirectResponse(url=redirect_url)

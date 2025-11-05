@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, useNavigate, useParams } from "react-router-dom";
 import Dashboard from "./Dashboard";
+import SelectGuild from "./SelectGuild";
 
 function Home() {
   const [guilds, setGuilds] = useState([]);
@@ -104,6 +105,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/dashboard/:guild_id" element={<Dashboard />} />
+      <Route path="/select-guild" element={<SelectGuild />} />
     </Routes>
   );
 }

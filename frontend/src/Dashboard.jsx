@@ -9,7 +9,6 @@ function useQuery() {
 export default function Dashboard() {
   const { guild_id } = useParams();
   const [slots, setSlots] = useState([]);
-  const [backgroundUrl, setBackgroundUrl] = useState("");
   const [channels, setChannels] = useState([]);
   const [gifs, setGifs] = useState([]);
   const [selectedGif, setSelectedGif] = useState("");
@@ -24,13 +23,10 @@ export default function Dashboard() {
   useEffect(() => {
     const userId = query.get("user_id");
     const username = query.get("username");
-
     if (userId && username) {
       console.log("✅ Logged in as:", username);
       localStorage.setItem("user_id", userId);
       localStorage.setItem("username", username);
-      // Clean up the URL
-      navigate("/dashboard", { replace: true });
     }
   }, []);
 
@@ -40,25 +36,22 @@ export default function Dashboard() {
     if (!userId) {
       navigate("/login");
     }
-  }, []);
+  }, [navigate]);
 
   // 🎯 Load slots
   useEffect(() => {
     if (!guild_id) return;
+    console.log("Loading slots for guild:", guild_id);
     fetch(`${API_URL}/api/guilds/${guild_id}/slots`)
       .then((res) => res.json())
-      .then((data) => {
-        setSlots(data);
-        if (data.length > 0 && data[0].background_url) {
-          setBackgroundUrl(data[0].background_url);
-        }
-      })
+      .then((data) => setSlots(Array.isArray(data) ? data : []))
       .catch((err) => console.error("Error loading slots:", err));
   }, [guild_id]);
 
   // 💬 Load channels
   useEffect(() => {
     if (!guild_id) return;
+    console.log("Loading channels for guild:", guild_id);
     fetch(`${API_URL}/api/guilds/${guild_id}/channels`)
       .then((res) => res.json())
       .then((data) => {
@@ -104,8 +97,6 @@ export default function Dashboard() {
             teamname: slot.teamname,
             teamtag: slot.teamtag,
             emoji: slot.emoji,
-            background_url: backgroundUrl,
-            channel_id: selectedChannel,
           }),
         }
       );
@@ -156,15 +147,13 @@ export default function Dashboard() {
     }
   };
 
-  // 🧭 Logged-in user display
   const username = localStorage.getItem("username") || "Guest";
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
-      <h1 className="text-3xl font-bold mb-2 text-left">Dashboard</h1>
-      <p className="mb-6 text-gray-400 text-left">
-        Welcome, <span className="font-semibold">{username}</span> 👋
-      </p>
+      <h1 className="text-3xl font-bold mb-2 text-left">
+        Dashboard – {username}
+      </h1>
       <p className="mb-6 text-gray-400 text-left">Guild ID: {guild_id}</p>
 
       {/* 🌍 Global Controls */}
@@ -244,16 +233,6 @@ export default function Dashboard() {
               value={slot.teamtag || ""}
               onChange={(e) => updateSlot(index, "teamtag", e.target.value)}
             />
-
-            <select
-              className="w-full bg-gray-700 rounded p-2 mb-2 text-left"
-              value={slot.emoji || ""}
-              onChange={(e) => updateSlot(index, "emoji", e.target.value)}
-            >
-              <option value="">Select Emoji</option>
-              <option value="✅">✅ Yes</option>
-              <option value="❌">❌ No</option>
-            </select>
 
             <button
               onClick={() => saveSlot(slot)}

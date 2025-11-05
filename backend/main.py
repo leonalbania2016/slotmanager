@@ -256,6 +256,30 @@ def list_slots(guild_id: str):
         }
         for s in slots
     ]
+@app.post("/api/guilds/{guild_id}/slots/{slot_number}")
+def update_slot(guild_id: str, slot_number: int, data: dict):
+    try:
+        teamname = data.get("teamname")
+        teamtag = data.get("teamtag")
+        emoji = data.get("emoji")
+
+        # For now, just print / return; later you can store in DB
+        print(f"🔧 Updating slot {slot_number} for guild {guild_id}")
+        print(f"Team: {teamname} | Tag: {teamtag} | Emoji: {emoji}")
+
+        # Example response
+        return {
+            "status": "ok",
+            "guild_id": guild_id,
+            "slot_number": slot_number,
+            "teamname": teamname,
+            "teamtag": teamtag,
+            "emoji": emoji,
+        }
+
+    except Exception as e:
+        print("❌ Error updating slot:", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/guilds/{guild_id}/send_slots")
 def send_slots(guild_id: str, body: SendSlotsBody):

@@ -419,56 +419,67 @@ def update_slot(guild_id: str, slot_number: int, data: dict):
     return {"status": "ok"}
 
 # --- Save ALL slots at once (one-button save) --------------------------------
+from fastapi import Request, HTTPException
+
 @app.post("/api/guilds/{guild_id}/slots/bulk_update")
-def bulk_update_slots(guild_id: str, body: BulkSlotsBody):
+async def bulk_update_slots(guild_id: str, request: Request):
     """
     Save/update all provided slots in a single transaction.
-    If a slot doesn't exist, it is created.
-    If 'background_name' provided, it's stored into background_url.
-    For emojis:
-      - If value looks like a custom emoji "<:name:id>" or "<a:name:id>", convert to CDN URL.
-      - If value is already a CDN URL, store as-is.
-      - Otherwise keep unicode.
+    Adds debug output to help trace 422 errors.
     """
-    db = _db()
-    updated = 0
+    try:
+        data = await request.json()
+        print("📦 Incoming bulk_update body:", json.dumps(data, indent=2))  # <-- logs what frontend sends
 
-    def to_emoji_value(raw: Optional[str]) -> Optional[str]:
-        if not raw:
+        # Ensure it's wrapped in { "slots": [...] }
+        if isinstance(data, list):
+            data = {"slots": data}
+        if "slots" not in data:
+            raise HTTPException(status_code=400, detail="Missing 'slots' array in request body")
+
+        body = BulkSlotsBody(**data)
+        db = _db()
+        updated = 0
+
+        def to_emoji_value(raw: Optional[str]) -> Optional[str]:
+            if not raw:
+                return raw
+            raw = raw.strip()
+            if raw.startswith("http"):
+                return raw
+            if raw.startswith("<") and raw.endswith(">") and ":" in raw:
+                parts = raw.strip("<>").split(":")
+                if len(parts) >= 2:
+                    eid = parts[-1]
+                    animated = parts[0] == "a"
+                    ext = "gif" if animated else "png"
+                    return f"https://cdn.discordapp.com/emojis/{eid}.{ext}?quality=lossless"
             return raw
-        raw = raw.strip()
-        if raw.startswith("http"):
-            return raw
-        # custom emoji formats: <:name:id> or <a:name:id>
-        if raw.startswith("<") and raw.endswith(">") and ":" in raw:
-            parts = raw.strip("<>").split(":")
-            if len(parts) >= 2:
-                eid = parts[-1]
-                animated = parts[0] == "a"
-                ext = "gif" if animated else "png"
-                return f"https://cdn.discordapp.com/emojis/{eid}.{ext}?quality=lossless"
-        return raw  # unicode or text
 
-    for item in body.slots:
-        s = (db.query(Slot).filter(Slot.guild_id == guild_id, Slot.slot_number == item.slot_number).first())
-        if not s:
-            s = Slot(guild_id=guild_id, slot_number=item.slot_number)
-            db.add(s)
+        for item in body.slots:
+            s = db.query(Slot).filter(Slot.guild_id == guild_id, Slot.slot_number == item.slot_number).first()
+            if not s:
+                s = Slot(guild_id=guild_id, slot_number=item.slot_number)
+                db.add(s)
 
-        payload = item.model_dump(exclude_unset=True)
-        if "background_name" in payload and payload["background_name"] is not None:
-            s.background_url = payload.pop("background_name")
+            payload = item.model_dump(exclude_unset=True)
+            if "background_name" in payload and payload["background_name"] is not None:
+                s.background_url = payload.pop("background_name")
 
-        # normalize emoji to usable value (CDN url or unicode)
-        if "emoji" in payload:
-            payload["emoji"] = to_emoji_value(payload["emoji"])
+            if "emoji" in payload:
+                payload["emoji"] = to_emoji_value(payload["emoji"])
 
-        for field, value in payload.items():
-            setattr(s, field, value)
-        updated += 1
+            for field, value in payload.items():
+                setattr(s, field, value)
+            updated += 1
 
-    db.commit()
-    return {"ok": True, "updated": updated}
+        db.commit()
+        return {"ok": True, "updated": updated}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=422, detail=f"Bulk update failed: {str(e)}")
 
 # --- Single image generation (for bot) ---------------------------------------
 @app.get("/api/generate/{guild_id}/{slot_number}")

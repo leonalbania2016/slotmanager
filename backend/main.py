@@ -284,6 +284,39 @@ class GuildChannelBody(BaseModel):
 # =============================================================================
 # Routes
 # =============================================================================
+# ----------------------------------------------------------------------
+# Return available GIFs for the guild
+# ----------------------------------------------------------------------
+@app.get("/api/guilds/{guild_id}/gifs")
+async def list_guild_gifs(guild_id: str):
+    gifs_dir = os.path.join("assets", "gifs")
+    try:
+        files = [
+            f
+            for f in os.listdir(gifs_dir)
+            if f.lower().endswith((".gif", ".mp4"))
+        ]
+        return {"status": "success", "gifs": files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----------------------------------------------------------------------
+# Return Discord channels for the guild
+# ----------------------------------------------------------------------
+@app.get("/api/guilds/{guild_id}/channels")
+async def get_guild_channels(guild_id: str):
+    try:
+        url = f"https://discord.com/api/guilds/{guild_id}/channels"
+        headers = {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail="Failed to fetch channels")
+        return response.json()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/")
 def root():
     return {"ok": True, "service": "slotmanager-backend"}

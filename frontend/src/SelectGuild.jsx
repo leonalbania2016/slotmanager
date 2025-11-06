@@ -1,83 +1,140 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import axios from "axios";
 
-export default function SelectGuild() {
+const backendURL = "https://slotmanager-backend.onrender.com";
+const frontendURL = window.location.origin;
+
+const SelectGuild = () => {
   const [guilds, setGuilds] = useState([]);
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const guildsParam = params.get("guilds");
+    // Parse URL params after redirect from /auth/callback
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    const guildData = params.get("guilds");
+    const username = params.get("username");
+    const userId = params.get("user_id");
 
-      // If no guild data from Discord callback, user isn’t logged in
-      if (!guildsParam) {
-        alert("⚠️ Please log in with Discord first.");
-        navigate("/");
-        return;
-      }
-
-      // Decode the guilds array from backend redirect
-      const decodedGuilds = JSON.parse(decodeURIComponent(guildsParam));
-      setGuilds(decodedGuilds);
-    } catch (err) {
-      console.error("Failed to load guilds:", err);
-      alert("❌ Could not load Discord servers. Please log in again.");
-    } finally {
-      setLoading(false);
+    if (token) {
+      // ✅ Save token in localStorage for later API calls
+      localStorage.setItem("discord_token", token);
     }
-  }, [navigate]);
 
-  const handleSelectGuild = (guildId) => {
-    // Go to dashboard for the selected server
-    navigate(`/dashboard/${guildId}`);
+    if (guildData) {
+      try {
+        const parsedGuilds = JSON.parse(decodeURIComponent(guildData));
+        setGuilds(parsedGuilds);
+      } catch (err) {
+        console.error("Failed to parse guild data:", err);
+        setError("Could not load your servers.");
+      }
+    }
+
+    if (username && userId) {
+      setUser({ id: userId, username });
+    }
+
+    setLoading(false);
+  }, []);
+
+  const handleGuildSelect = (guildId) => {
+    const token = localStorage.getItem("discord_token");
+    if (!token) {
+      alert("No token found. Please log in again.");
+      window.location.href = `${backendURL}/login`;
+      return;
+    }
+
+    // Redirect to Dashboard with guild_id in URL
+    window.location.href = `${frontendURL}/dashboard?guild_id=${guildId}`;
+  };
+
+  const handleLogin = () => {
+    // Start Discord OAuth login flow
+    window.location.href = `${backendURL}/login`;
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white text-xl">
-        Loading your Discord servers...
-      </div>
-    );
+    return <div style={{ textAlign: "center", marginTop: "40px" }}>Loading...</div>;
+  }
+
+  if (error) {
+    return <div style={{ textAlign: "center", color: "red" }}>{error}</div>;
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white px-6">
-      <h1 className="text-3xl font-bold mb-6 text-center">
-        Select a Discord Server
-      </h1>
+    <div
+      style={{
+        maxWidth: "600px",
+        margin: "50px auto",
+        textAlign: "center",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <h1>🪄 Select a Discord Server</h1>
 
-      {guilds.length === 0 ? (
-        <p className="text-gray-400 text-lg">
-          No servers found or missing permissions.
+      {user ? (
+        <p>
+          Logged in as <strong>{user.username}</strong>
         </p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 w-full max-w-5xl">
-          {guilds.map((guild) => (
-            <button
-              key={guild.id}
-              onClick={() => handleSelectGuild(guild.id)}
-              className="bg-blue-600 hover:bg-blue-700 py-4 px-6 rounded-xl transition flex flex-col items-center shadow-lg hover:shadow-blue-500/50"
-            >
-              {guild.icon ? (
-                <img
-                  src={`https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png`}
-                  alt={guild.name}
-                  className="w-16 h-16 rounded-full mb-3 shadow-md"
-                />
-              ) : (
-                <div className="w-16 h-16 bg-gray-800 rounded-full mb-3 flex items-center justify-center text-2xl">
-                  🏠
-                </div>
-              )}
-              <span className="truncate text-lg font-semibold">
-                {guild.name}
-              </span>
-            </button>
-          ))}
+        <p>Log in to manage your servers.</p>
+      )}
+
+      {!user && (
+        <button
+          style={{
+            padding: "10px 20px",
+            background: "#5865F2",
+            color: "white",
+            border: "none",
+            borderRadius: "6px",
+            cursor: "pointer",
+          }}
+          onClick={handleLogin}
+        >
+          Login with Discord
+        </button>
+      )}
+
+      {user && guilds.length > 0 && (
+        <div style={{ marginTop: "20px" }}>
+          <h3>Your Servers</h3>
+          <ul style={{ listStyle: "none", padding: 0 }}>
+            {guilds.map((guild) => (
+              <li
+                key={guild.id}
+                onClick={() => handleGuildSelect(guild.id)}
+                style={{
+                  margin: "10px 0",
+                  padding: "10px",
+                  border: "1px solid #ccc",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  transition: "0.2s",
+                }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.backgroundColor = "#f3f3f3")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.backgroundColor = "white")
+                }
+              >
+                <strong>{guild.name}</strong>
+              </li>
+            ))}
+          </ul>
         </div>
+      )}
+
+      {user && guilds.length === 0 && (
+        <p>You don’t have any servers with Manage Server permission.</p>
       )}
     </div>
   );
-}
+};
+
+export default SelectGuild;

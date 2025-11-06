@@ -30,10 +30,7 @@ DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        FRONTEND_URL,
-        "http://localhost:5173",
-    ],
+    allow_origins=["http://localhost:5173", "https://slotmanager-frontend.onrender.com"],  # adjust
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -679,10 +676,12 @@ def auth_callback(code: str):
     if token_response.status_code != 200:
         raise HTTPException(status_code=400, detail="Failed to get access token")
 
-    access_token = token_response.json().get("access_token")
+    token_json = token_response.json()
+    access_token = token_json.get("access_token")
     if not access_token:
         raise HTTPException(status_code=400, detail="Missing access token")
 
+    # Fetch user and guilds
     user_data = httpx.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -694,22 +693,26 @@ def auth_callback(code: str):
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=15.0,
     )
+
     if guilds_resp.status_code != 200:
         raise HTTPException(status_code=400, detail="Failed to fetch guilds")
 
     guilds = guilds_resp.json()
-    if not guilds:
-        raise HTTPException(status_code=400, detail="No accessible guilds found")
-
     allowed = [
         {"id": g["id"], "name": g["name"]}
         for g in guilds
         if g.get("permissions", 0) & 0x20  # MANAGE_GUILD
     ]
 
-    encoded = quote(json.dumps(allowed))
+    # Redirect to frontend with token and data
+    encoded_guilds = quote(json.dumps(allowed))
+    encoded_token = quote(access_token)
     redirect_url = (
         f"{FRONTEND_URL}/select-guild?"
-        f"user_id={user_data['id']}&username={quote(user_data['username'])}&guilds={encoded}"
+        f"user_id={user_data['id']}"
+        f"&username={quote(user_data['username'])}"
+        f"&token={encoded_token}"
+        f"&guilds={encoded_guilds}"
     )
     return RedirectResponse(url=redirect_url)
+

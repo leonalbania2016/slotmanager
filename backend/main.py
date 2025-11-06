@@ -2,6 +2,7 @@ import os
 import io
 import time
 import json
+from urllib.parse import quote
 import httpx
 import imageio
 from typing import Optional, List, Tuple
@@ -580,7 +581,7 @@ def send_slots(guild_id: str, body: SendSlotsBody):
     return {"status": "sent"}
 
 # =============================================================================
-# OAuth callback – redirects to your frontend dashboard
+# OAuth callback – redirects to your frontend dashboard (SAFE ENCODING)
 # =============================================================================
 @app.get("/auth/callback")
 def auth_callback(code: str):
@@ -628,9 +629,9 @@ def auth_callback(code: str):
         if g.get("permissions", 0) & 0x20  # MANAGE_GUILD
     ]
 
-    encoded = json.dumps(allowed)
+    encoded = quote(json.dumps(allowed))
     redirect_url = (
         f"{FRONTEND_URL}/select-guild?"
-        f"user_id={user_data['id']}&username={user_data['username']}&guilds={encoded}"
+        f"user_id={user_data['id']}&username={quote(user_data['username'])}&guilds={encoded}"
     )
     return RedirectResponse(url=redirect_url)

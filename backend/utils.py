@@ -4,6 +4,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageSequence
 import requests
 from typing import Tuple
 
+# Cache emoji bitmaps for speed
+_EMOJI_CACHE = {}
+
 def load_font(font_family: str, font_size: int):
     try:
         return ImageFont.truetype(font_family, font_size)
@@ -13,15 +16,46 @@ def load_font(font_family: str, font_size: int):
         except Exception:
             return ImageFont.load_default()
 
+def fetch_emoji_bitmap(emoji_value: str, target_height: int = 64) -> Image.Image | None:
+    """
+    Converts a Discord emoji code (<:name:id> or <a:name:id>) or CDN URL
+    into a transparent PIL image.
+    """
+    if not emoji_value:
+        return None
+
+    # Handle Discord emoji CDN URL directly
+    if emoji_value.startswith("http"):
+        url = emoji_value
+    elif emoji_value.startswith("<") and emoji_value.endswith(">"):
+        parts = emoji_value.strip("<>").split(":")
+        if len(parts) >= 2:
+            animated = parts[0] == "a"
+            emoji_id = parts[-1]
+            ext = "gif" if animated else "png"
+            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?quality=lossless"
+        else:
+            return None
+    else:
+        # Standard Unicode emoji — draw as text
+        return None
+
+    if url in _EMOJI_CACHE:
+        return _EMOJI_CACHE[url]
+
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+        ratio = target_height / img.height
+        img = img.resize((int(img.width * ratio), target_height), Image.Resampling.LANCZOS)
+        _EMOJI_CACHE[url] = img
+        return img
+    except Exception as e:
+        print("⚠️ Failed to fetch emoji:", e)
+        return None
+
 def draw_slot_on_image(pil_img: Image.Image, meta: dict) -> Image.Image:
-    """
-    Draw a one-line slot layout on pil_img using meta:
-    - slot_number, teamname, teamtag, emoji
-    - font_family, font_size, font_color
-    - padding_top, padding_bottom (pixels)
-    The text baseline is vertically positioned between padding_top and (height - padding_bottom),
-    centered within that remaining band.
-    """
     draw = ImageDraw.Draw(pil_img)
     w, h = pil_img.size
 
@@ -31,48 +65,46 @@ def draw_slot_on_image(pil_img: Image.Image, meta: dict) -> Image.Image:
     padding_top = int(meta.get("padding_top", 0))
     padding_bottom = int(meta.get("padding_bottom", 0))
 
-    # compute usable vertical band
     usable_top = padding_top
     usable_bottom = max(0, h - padding_bottom)
     usable_height = max(1, usable_bottom - usable_top)
 
-    # vertical center for text within usable band
-    # measure text height roughly and center it
     teamname = meta.get("teamname", "") or ""
     teamtag = meta.get("teamtag", "") or ""
-    if teamname and teamtag:
-        main_text = f"{teamname} - {teamtag}"
-    else:
-        main_text = teamname or teamtag
+    main_text = f"{teamname} - {teamtag}" if (teamname and teamtag) else teamname or teamtag
 
     slot_text = str(meta.get("slot_number", ""))
-    emoji_text = meta.get("emoji", "")
+    emoji_value = meta.get("emoji", "")
 
-    # For layout, we'll measure texts
+    # Measure text
     slot_w, slot_h = draw.textsize(slot_text, font=font)
     main_w, main_h = draw.textsize(main_text, font=font)
-    emoji_w, emoji_h = draw.textsize(emoji_text, font=font)
-
-    total_text_width = slot_w + 20 + main_w + 20 + emoji_w  # small gaps
-    # positions
-    padding_x = 20
-    left_x = padding_x
-    # center block start
-    center_start = (w - main_w) / 2
-    # emoji right
-    emoji_x = w - emoji_w - padding_x
-
-    # vertical y
     y_center = usable_top + (usable_height - main_h) / 2
 
-    # draw slot number on the left (align left)
+    padding_x = 20
+    left_x = padding_x
+    center_x = (w - main_w) / 2
+
+    # Draw left (slot number)
     draw.text((left_x, y_center), slot_text, font=font, fill=color)
 
-    # draw main text centered horizontally
-    draw.text((center_start, y_center), main_text, font=font, fill=color)
+    # Draw center (team name/tag)
+    draw.text((center_x, y_center), main_text, font=font, fill=color)
 
-    # draw emoji at right
-    draw.text((emoji_x, y_center), emoji_text, font=font, fill=color)
+    # Draw right (emoji)
+    emoji_x = w - padding_x
+    emoji_img = fetch_emoji_bitmap(emoji_value, target_height=font_size)
+
+    if emoji_img:
+        emoji_x -= emoji_img.width
+        emoji_y = usable_top + (usable_height - emoji_img.height) / 2
+        pil_img.paste(emoji_img, (int(emoji_x), int(emoji_y)), emoji_img)
+    elif emoji_value:
+        # fallback: draw as Unicode
+        emoji_w, emoji_h = draw.textsize(emoji_value, font=font)
+        emoji_x -= emoji_w
+        emoji_y = y_center
+        draw.text((emoji_x, emoji_y), emoji_value, font=font, fill=color)
 
     return pil_img
 
@@ -91,17 +123,16 @@ def generate_from_url_bytes(bg_bytes: bytes, content_type: str, meta: dict) -> T
             duration = im.info.get("duration", 100)
             for frame in ImageSequence.Iterator(im):
                 frame = frame.convert("RGBA")
-                f2 = frame.copy()
-                f2 = draw_slot_on_image(f2, meta)
-                frames.append(f2)
+                composed = draw_slot_on_image(frame.copy(), meta)
+                frames.append(composed)
             out_buf = io.BytesIO()
             frames[0].save(out_buf, format="GIF", save_all=True, append_images=frames[1:], loop=0, duration=duration)
             out_buf.seek(0)
             return out_buf.read(), "image/gif"
         else:
             im = Image.open(buf).convert("RGBA")
-            im = draw_slot_on_image(im, meta)
+            composed = draw_slot_on_image(im, meta)
             out_buf = io.BytesIO()
-            im.save(out_buf, format="PNG")
+            composed.save(out_buf, format="PNG")
             out_buf.seek(0)
             return out_buf.read(), "image/png"

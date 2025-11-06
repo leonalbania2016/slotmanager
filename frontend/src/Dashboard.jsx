@@ -1,246 +1,227 @@
-import { useEffect, useState } from "react";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
 
-// helper for parsing ?user_id=...&username=...
-function useQuery() {
-  return new URLSearchParams(useLocation().search);
-}
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-export default function Dashboard() {
-  const { guild_id } = useParams();
+export default function Dashboard({ guild_id }) {
   const [slots, setSlots] = useState([]);
-  const [channels, setChannels] = useState([]);
-  const [gifs, setGifs] = useState([]);
-  const [selectedGif, setSelectedGif] = useState("");
+  const [emojis, setEmojis] = useState([]);
+  const [backgrounds, setBackgrounds] = useState([]);
   const [selectedChannel, setSelectedChannel] = useState("");
+  const [channels, setChannels] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
 
-  const API_URL = "https://slotmanager-backend.onrender.com";
-  const query = useQuery();
-  const navigate = useNavigate();
-
-  // 🧩 Handle login redirect from Discord
-  useEffect(() => {
-    const userId = query.get("user_id");
-    const username = query.get("username");
-    if (userId && username) {
-      console.log("✅ Logged in as:", username);
-      localStorage.setItem("user_id", userId);
-      localStorage.setItem("username", username);
-    }
-  }, []);
-
-  // 🧠 Redirect to login if not logged in
-  useEffect(() => {
-    const userId = localStorage.getItem("user_id");
-    if (!userId) {
-      navigate("/login");
-    }
-  }, [navigate]);
-
-  // 🎯 Load slots
+  // Fetch initial data
   useEffect(() => {
     if (!guild_id) return;
-    console.log("Loading slots for guild:", guild_id);
-    fetch(`${API_URL}/api/guilds/${guild_id}/slots`)
-      .then((res) => res.json())
-      .then((data) => setSlots(Array.isArray(data) ? data : []))
-      .catch((err) => console.error("Error loading slots:", err));
+
+    const fetchAll = async () => {
+      try {
+        setLoading(true);
+
+        const [slotsRes, gifsRes, channelsRes, emojisRes] = await Promise.all([
+          fetch(`${API_URL}/api/guilds/${guild_id}/slots`),
+          fetch(`${API_URL}/api/guilds/${guild_id}/gifs`),
+          fetch(`${API_URL}/api/guilds/${guild_id}/channels`),
+          fetch(`${API_URL}/api/guilds/${guild_id}/emojis`),
+        ]);
+
+        const [slotsData, gifsData, channelsData, emojisData] = await Promise.all([
+          slotsRes.json(),
+          gifsRes.json(),
+          channelsRes.json(),
+          emojisRes.json(),
+        ]);
+
+        setSlots(slotsData);
+        setBackgrounds(gifsData);
+        setChannels(channelsData);
+        setEmojis(emojisData);
+      } catch (err) {
+        console.error("❌ Failed to load dashboard data:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAll();
   }, [guild_id]);
 
-  // 💬 Load channels
-  useEffect(() => {
-    if (!guild_id) return;
-    console.log("Loading channels for guild:", guild_id);
-    fetch(`${API_URL}/api/guilds/${guild_id}/channels`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) setChannels(data);
-        else if (data.channels && Array.isArray(data.channels))
-          setChannels(data.channels);
-      })
-      .catch((err) => console.error("Failed to load channels:", err));
-  }, [guild_id]);
-
-  // 🎞️ Load available GIFs
-  useEffect(() => {
-    fetch(`${API_URL}/api/gifs`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data.gifs)) setGifs(data.gifs);
-      })
-      .catch((err) => console.error("Error loading GIFs:", err));
-  }, []);
-
-  // ✏️ Update slot locally
-  const updateSlot = (index, key, value) => {
+  // Update a single slot field
+  const updateSlot = (index, field, value) => {
     const updated = [...slots];
-    updated[index][key] = value;
+    updated[index][field] = value;
     setSlots(updated);
   };
 
-  // 💾 Save one slot
-  const saveSlot = async (slot) => {
-    if (!selectedChannel) {
-      alert("Please select a Discord channel first!");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const res = await fetch(
-        `${API_URL}/api/guilds/${guild_id}/slots/${slot.slot_number}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            teamname: slot.teamname,
-            teamtag: slot.teamtag,
-            emoji: slot.emoji,
-          }),
-        }
-      );
-
-      if (!res.ok) throw new Error("Save failed");
-      console.log(`✅ Slot #${slot.slot_number} saved successfully.`);
-    } catch (err) {
-      console.error(err);
-      alert("❌ Failed to save slot");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // 🚀 Send all slots to Discord
-  const sendSlots = async () => {
+  // Save all slots in one request
+  const saveAllSlots = async () => {
     if (!selectedChannel) {
       alert("⚠️ Please select a Discord channel first!");
       return;
     }
 
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/guilds/${guild_id}/slots/bulk_update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(slots),
+      });
+
+      if (!res.ok) throw new Error("Bulk save failed");
+      alert("✅ All slots saved successfully!");
+    } catch (err) {
+      console.error(err);
+      alert("❌ Failed to save all slots.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Send all slots to Discord
+  const sendAllSlots = async () => {
+    if (!selectedChannel) {
+      alert("⚠️ Please select a Discord channel first!");
+      return;
+    }
+
+    setSending(true);
     try {
       const res = await fetch(`${API_URL}/api/guilds/${guild_id}/send_slots`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          channel_id: selectedChannel,
-          gif_name: selectedGif || "default.gif",
-        }),
+        body: JSON.stringify({ channel_id: selectedChannel }),
       });
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Backend error:", errorText);
-        alert("❌ Failed to send slots — check backend logs.");
-        return;
-      }
-
-      const data = await res.json();
-      if (data.status === "sent" || data.status === "success") {
-        alert("✅ Slots sent successfully!");
-      } else {
-        alert("❌ Failed to send slots.");
-      }
+      if (!res.ok) throw new Error("Send failed");
+      alert("✅ Slots sent to Discord!");
     } catch (err) {
-      console.error("Failed to send slots:", err);
-      alert("❌ Network error while sending slots.");
+      console.error(err);
+      alert("❌ Failed to send slots.");
+    } finally {
+      setSending(false);
     }
   };
 
-  const username = localStorage.getItem("username") || "Guest";
+  if (loading) return <div className="text-center p-10 text-gray-400">Loading...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <h1 className="text-3xl font-bold mb-2 text-left">
-        Dashboard – {username}
-      </h1>
-      <p className="mb-6 text-gray-400 text-left">Guild ID: {guild_id}</p>
+    <div className="max-w-6xl mx-auto p-6 text-white">
+      <h1 className="text-3xl font-bold mb-4">🎮 Slot Manager Dashboard</h1>
 
-      {/* 🌍 Global Controls */}
-      <div className="mb-8 bg-gray-800 p-4 rounded-lg">
-        <h2 className="text-xl font-semibold mb-2">Global Settings</h2>
-
-        {/* GIF Selector */}
-        <div className="mb-4">
-          <label className="block mb-2 font-semibold text-left">
-            Select Background GIF:
-          </label>
-          <select
-            value={selectedGif}
-            onChange={(e) => setSelectedGif(e.target.value)}
-            className="bg-gray-700 p-2 rounded w-full"
-          >
-            <option value="">-- Choose a GIF (default if empty) --</option>
-            {gifs.map((gif) => (
-              <option key={gif} value={gif}>
-                {gif}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Channel Selector */}
-        <div className="mb-3">
-          <label className="block mb-2 font-semibold text-left">
-            Select Discord Channel:
-          </label>
-          <select
-            value={selectedChannel}
-            onChange={(e) => setSelectedChannel(e.target.value)}
-            className="bg-gray-700 p-2 rounded w-full"
-          >
-            <option value="">-- Choose a channel --</option>
-            {channels.map((ch) => (
-              <option key={ch.id} value={ch.id}>
-                #{ch.name}
-              </option>
-            ))}
-          </select>
-
-          <button
-            onClick={sendSlots}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded mt-3 transition w-full"
-          >
-            📤 Send Slots to Discord
-          </button>
-        </div>
+      {/* Channel Selector */}
+      <div className="mb-4">
+        <label className="block mb-2 text-gray-400">Select Discord Channel</label>
+        <select
+          value={selectedChannel}
+          onChange={(e) => setSelectedChannel(e.target.value)}
+          className="bg-gray-800 text-white p-2 rounded w-full"
+        >
+          <option value="">-- Choose a Channel --</option>
+          {channels.map((ch) => (
+            <option key={ch.id} value={ch.id}>
+              #{ch.name}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* 🧩 Slot List */}
-      <h2 className="text-xl mb-4 font-semibold text-left">Slots</h2>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Global Buttons */}
+      <div className="flex gap-3 mb-6">
+        <button
+          onClick={saveAllSlots}
+          disabled={saving}
+          className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded transition w-1/2"
+        >
+          {saving ? "💾 Saving All..." : "💾 Save All Slots"}
+        </button>
+
+        <button
+          onClick={sendAllSlots}
+          disabled={sending}
+          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded transition w-1/2"
+        >
+          {sending ? "📤 Sending..." : "📤 Send Slots to Discord"}
+        </button>
+      </div>
+
+      {/* Slots Editor */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {slots.map((slot, index) => (
           <div
             key={slot.slot_number}
-            className="bg-gray-800 p-4 rounded-lg shadow hover:bg-gray-700 transition text-left"
+            className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-md"
           >
-            <h3 className="text-lg font-bold mb-2 text-left">
-              {slot.slot_number}{" "}
-              <span className="text-sm text-gray-400">
-                {slot.teamname || "FreeSlot"} {slot.teamtag || ""}
-              </span>
-            </h3>
+            <h2 className="text-xl font-semibold mb-2">Slot #{slot.slot_number}</h2>
 
             <input
-              className="w-full bg-gray-700 rounded p-2 mb-2 text-left"
+              type="text"
               placeholder="Team Name"
               value={slot.teamname || ""}
               onChange={(e) => updateSlot(index, "teamname", e.target.value)}
+              className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
             />
+
             <input
-              className="w-full bg-gray-700 rounded p-2 mb-2 text-left"
+              type="text"
               placeholder="Team Tag"
               value={slot.teamtag || ""}
               onChange={(e) => updateSlot(index, "teamtag", e.target.value)}
+              className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
             />
 
-            <button
-              onClick={() => saveSlot(slot)}
-              disabled={saving}
-              className="bg-blue-600 px-4 py-2 rounded mt-2 w-full hover:bg-blue-500 transition"
+            {/* Emoji Picker */}
+            <select
+              value={slot.emoji || ""}
+              onChange={(e) => updateSlot(index, "emoji", e.target.value)}
+              className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
             >
-              {saving ? "Saving..." : "Save Slot"}
-            </button>
+              <option value="">-- Choose Emoji --</option>
+              {emojis.map((em) => (
+                <option key={em.id} value={em.format}>
+                  {em.name}
+                </option>
+              ))}
+            </select>
+
+            {/* Background Selector */}
+            <select
+              value={slot.background_url || ""}
+              onChange={(e) => updateSlot(index, "background_url", e.target.value)}
+              className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
+            >
+              <option value="">-- Choose Background --</option>
+              {backgrounds.map((bg, i) => (
+                <option key={i} value={bg.url}>
+                  {bg.name}
+                </option>
+              ))}
+            </select>
+
+            <div className="flex gap-2">
+              <input
+                type="number"
+                placeholder="Font Size"
+                value={slot.font_size || 48}
+                onChange={(e) => updateSlot(index, "font_size", parseInt(e.target.value))}
+                className="w-1/3 p-2 bg-gray-800 rounded text-white"
+              />
+              <input
+                type="color"
+                value={slot.font_color || "#FFFFFF"}
+                onChange={(e) => updateSlot(index, "font_color", e.target.value)}
+                className="w-1/3 h-10 rounded"
+              />
+              <input
+                type="number"
+                placeholder="Padding Top"
+                value={slot.padding_top || 0}
+                onChange={(e) => updateSlot(index, "padding_top", parseInt(e.target.value))}
+                className="w-1/3 p-2 bg-gray-800 rounded text-white"
+              />
+            </div>
           </div>
         ))}
       </div>

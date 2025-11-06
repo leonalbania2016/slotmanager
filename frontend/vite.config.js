@@ -7,7 +7,6 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      // Ensures Netlify/Render redirects are included in production build
       name: "copy-redirects",
       closeBundle() {
         try {
@@ -23,9 +22,18 @@ export default defineConfig({
     },
   ],
   build: {
-    outDir: "dist", // This is what Render deploys
+    outDir: "dist",
   },
   server: {
-    historyApiFallback: true, // Enable client-side routing
+    port: 5173,
+    open: true,
+    // Enable React Router support locally
+    historyApiFallback: true,
+  },
+  preview: {
+    port: 4173,
+    open: true,
+    // Make sure preview also supports routes
+    historyApiFallback: true,
   },
 });

@@ -68,7 +68,7 @@ export default function Dashboard({ guild_id }) {
       const res = await fetch(`${API_URL}/api/guilds/${guild_id}/slots/bulk_update`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(slots),
+        body: JSON.stringify({ slots }),
       });
 
       if (!res.ok) throw new Error("Bulk save failed");

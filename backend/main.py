@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, Response
 
@@ -419,67 +419,101 @@ def update_slot(guild_id: str, slot_number: int, data: dict):
     return {"status": "ok"}
 
 # --- Save ALL slots at once (one-button save) --------------------------------
-from fastapi import Request, HTTPException
-
 @app.post("/api/guilds/{guild_id}/slots/bulk_update")
 async def bulk_update_slots(guild_id: str, request: Request):
     """
     Save/update all provided slots in a single transaction.
-    Adds debug output to help trace 422 errors.
+    Hardened parsing to avoid 422s:
+      - Accepts a plain array or an object with { "slots": [...] }.
+      - Accepts background_name or background_url.
+      - Coerces slot_number to int where possible.
+      - Normalizes custom emoji formats to Discord CDN URLs.
     """
     try:
-        data = await request.json()
-        print("📦 Incoming bulk_update body:", json.dumps(data, indent=2))  # <-- logs what frontend sends
+        raw = await request.json()
+        print("📦 Incoming bulk_update body:", json.dumps(raw, indent=2))
 
-        # Ensure it's wrapped in { "slots": [...] }
-        if isinstance(data, list):
-            data = {"slots": data}
-        if "slots" not in data:
-            raise HTTPException(status_code=400, detail="Missing 'slots' array in request body")
+        # Accept either a list or { "slots": [...] }
+        if isinstance(raw, list):
+            payload_slots = raw
+        elif isinstance(raw, dict) and "slots" in raw and isinstance(raw["slots"], list):
+            payload_slots = raw["slots"]
+        else:
+            raise HTTPException(status_code=400, detail="Body must be a list of slots or an object with 'slots' array")
 
-        body = BulkSlotsBody(**data)
-        db = _db()
-        updated = 0
-
-        def to_emoji_value(raw: Optional[str]) -> Optional[str]:
-            if not raw:
-                return raw
-            raw = raw.strip()
-            if raw.startswith("http"):
-                return raw
-            if raw.startswith("<") and raw.endswith(">") and ":" in raw:
-                parts = raw.strip("<>").split(":")
+        def to_emoji_value(raw_emoji: Optional[str]) -> Optional[str]:
+            if not raw_emoji:
+                return raw_emoji
+            val = str(raw_emoji).strip()
+            if val.startswith("http"):
+                return val
+            if val.startswith("<") and val.endswith(">") and ":" in val:
+                parts = val.strip("<>").split(":")
                 if len(parts) >= 2:
                     eid = parts[-1]
                     animated = parts[0] == "a"
                     ext = "gif" if animated else "png"
                     return f"https://cdn.discordapp.com/emojis/{eid}.{ext}?quality=lossless"
-            return raw
+            return val
 
-        for item in body.slots:
-            s = db.query(Slot).filter(Slot.guild_id == guild_id, Slot.slot_number == item.slot_number).first()
+        db = _db()
+        updated = 0
+
+        for item in payload_slots:
+            if not isinstance(item, dict):
+                continue
+
+            # Coerce/validate slot_number
+            sn = item.get("slot_number")
+            try:
+                sn = int(sn)
+            except Exception:
+                # skip invalid slot entries rather than 422
+                continue
+
+            s = db.query(Slot).filter(Slot.guild_id == guild_id, Slot.slot_number == sn).first()
             if not s:
-                s = Slot(guild_id=guild_id, slot_number=item.slot_number)
+                s = Slot(guild_id=guild_id, slot_number=sn)
                 db.add(s)
 
-            payload = item.model_dump(exclude_unset=True)
-            if "background_name" in payload and payload["background_name"] is not None:
-                s.background_url = payload.pop("background_name")
+            # Normalize fields
+            teamname = item.get("teamname")
+            teamtag = item.get("teamtag")
+            emoji = to_emoji_value(item.get("emoji"))
+            font_family = item.get("font_family")
+            font_size = item.get("font_size")
+            font_color = item.get("font_color")
+            padding_top = item.get("padding_top")
+            padding_bottom = item.get("padding_bottom")
 
-            if "emoji" in payload:
-                payload["emoji"] = to_emoji_value(payload["emoji"])
+            # Accept background_name OR background_url
+            background_name = item.get("background_name")
+            background_url = item.get("background_url")
+            bg_value = background_name or background_url or DEFAULT_GIF_NAME
 
-            for field, value in payload.items():
-                setattr(s, field, value)
+            # Apply to model
+            s.teamname = teamname
+            s.teamtag = teamtag
+            s.emoji = emoji
+            s.font_family = font_family
+            s.font_size = font_size
+            s.font_color = font_color
+            s.padding_top = padding_top
+            s.padding_bottom = padding_bottom
+            s.background_url = bg_value
+
             updated += 1
 
         db.commit()
         return {"ok": True, "updated": updated}
 
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=422, detail=f"Bulk update failed: {str(e)}")
+        # Never 422 on normalization issues—return helpful message
+        raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
 
 # --- Single image generation (for bot) ---------------------------------------
 @app.get("/api/generate/{guild_id}/{slot_number}")

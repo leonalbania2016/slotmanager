@@ -23,7 +23,7 @@ const Dashboard = () => {
   }, []);
 
   // ------------------------------------------
-  // Fetch data for guild (slots, gifs, emojis, channels)
+  // Fetch guild data
   // ------------------------------------------
   useEffect(() => {
     if (!guildId) return;
@@ -38,13 +38,14 @@ const Dashboard = () => {
           axios.get(`${backendURL}/api/guilds/${guildId}/channels`),
         ]);
 
-        setSlots(slotsRes.data.slots || []);
-        setGifs(gifsRes.data.gifs || []);
-        setEmojis(emojisRes.data.emojis || []);
-        setChannels(channelsRes.data.channels || []);
+        // ✅ backend returns arrays directly
+        setSlots(slotsRes.data || []);
+        setGifs(gifsRes.data || []);
+        setEmojis(emojisRes.data || []);
+        setChannels(channelsRes.data || []);
       } catch (error) {
         console.error("❌ Error fetching data:", error);
-        alert("Failed to load data from backend. Check console for details.");
+        alert("Failed to load data. Check console for details.");
       } finally {
         setLoading(false);
       }
@@ -111,7 +112,7 @@ const Dashboard = () => {
   };
 
   // ------------------------------------------
-  // Send slots to a Discord channel
+  // Send slots to Discord
   // ------------------------------------------
   const sendSlots = async () => {
     if (!selectedChannel) return alert("Select a channel first!");
@@ -135,7 +136,7 @@ const Dashboard = () => {
   };
 
   // ------------------------------------------
-  // Inline styles
+  // Styles
   // ------------------------------------------
   const styles = {
     container: {
@@ -162,9 +163,6 @@ const Dashboard = () => {
       borderRadius: "6px",
       cursor: "pointer",
     },
-    buttonHover: {
-      background: "#0056b3",
-    },
     status: {
       background: "#f3f3f3",
       padding: "10px",
@@ -174,6 +172,12 @@ const Dashboard = () => {
     },
     select: { padding: "6px", borderRadius: "4px" },
     input: { padding: "4px", borderRadius: "4px" },
+    emojiPreview: {
+      width: "24px",
+      height: "24px",
+      verticalAlign: "middle",
+      marginRight: "5px",
+    },
   };
 
   // ------------------------------------------
@@ -185,7 +189,7 @@ const Dashboard = () => {
 
       {saveStatus && <div style={styles.status}>{saveStatus}</div>}
 
-      {/* Channel selection */}
+      {/* Channel Selection */}
       <div style={{ marginBottom: "20px" }}>
         <label style={{ marginRight: "10px" }}>Send to Channel:</label>
         <select
@@ -209,7 +213,7 @@ const Dashboard = () => {
         </button>
       </div>
 
-      {/* Table */}
+      {/* Slots Table */}
       <table style={styles.table}>
         <thead>
           <tr>
@@ -249,6 +253,8 @@ const Dashboard = () => {
                   onChange={(e) => updateSlot(i, "teamtag", e.target.value)}
                 />
               </td>
+
+              {/* ✅ Emoji selector with preview */}
               <td style={styles.thtd}>
                 <select
                   style={styles.select}
@@ -262,7 +268,26 @@ const Dashboard = () => {
                     </option>
                   ))}
                 </select>
+                {slot.emoji && (
+                  <div style={{ marginTop: "5px" }}>
+                    {(() => {
+                      const em = emojis.find((e) => e.name === slot.emoji);
+                      return (
+                        em && (
+                          <img
+                            src={em.url}
+                            alt={em.name}
+                            title={em.name}
+                            style={styles.emojiPreview}
+                          />
+                        )
+                      );
+                    })()}
+                  </div>
+                )}
               </td>
+
+              {/* Background */}
               <td style={styles.thtd}>
                 <select
                   style={styles.select}
@@ -278,6 +303,8 @@ const Dashboard = () => {
                   ))}
                 </select>
               </td>
+
+              {/* Font */}
               <td style={styles.thtd}>
                 <input
                   style={styles.input}
@@ -328,7 +355,7 @@ const Dashboard = () => {
         </tbody>
       </table>
 
-      {/* Buttons */}
+      {/* Action Buttons */}
       <div style={{ marginTop: "20px" }}>
         <button style={styles.button} onClick={addSlot}>
           ➕ Add Slot
@@ -344,3 +371,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

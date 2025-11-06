@@ -13,61 +13,55 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
 
-  // ------------------------------
-  // Load guild ID from URL (query)
-  // ------------------------------
+  // ------------------------------------------
+  // Load guild ID from URL
+  // ------------------------------------------
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get("guild_id");
-    if (id) {
-      setGuildId(id);
-    }
+    if (id) setGuildId(id);
   }, []);
 
-  // ------------------------------
-  // Fetch initial data when guildId is available
-  // ------------------------------
+  // ------------------------------------------
+  // Fetch data for guild (slots, gifs, emojis, channels)
+  // ------------------------------------------
   useEffect(() => {
     if (!guildId) return;
 
-    const fetchAll = async () => {
+    const fetchData = async () => {
       try {
         setLoading(true);
-
-        const [slotsRes, emojisRes, gifsRes, channelsRes] = await Promise.all([
+        const [slotsRes, gifsRes, emojisRes, channelsRes] = await Promise.all([
           axios.get(`${backendURL}/api/guilds/${guildId}/slots`),
-          axios.get(`${backendURL}/api/guilds/${guildId}/emojis`),
           axios.get(`${backendURL}/api/guilds/${guildId}/gifs`),
+          axios.get(`${backendURL}/api/guilds/${guildId}/emojis`),
           axios.get(`${backendURL}/api/guilds/${guildId}/channels`),
         ]);
 
         setSlots(slotsRes.data.slots || []);
-        setEmojis(emojisRes.data.emojis || []);
         setGifs(gifsRes.data.gifs || []);
+        setEmojis(emojisRes.data.emojis || []);
         setChannels(channelsRes.data.channels || []);
-      } catch (err) {
-        console.error("❌ Failed to fetch initial data:", err);
-        alert("Failed to load data from backend.");
+      } catch (error) {
+        console.error("❌ Error fetching data:", error);
+        alert("Failed to load data from backend. Check console for details.");
       } finally {
         setLoading(false);
       }
     };
 
-    fetchAll();
+    fetchData();
   }, [guildId]);
 
-  // ------------------------------
-  // Update individual slot field
-  // ------------------------------
+  // ------------------------------------------
+  // Slot handlers
+  // ------------------------------------------
   const updateSlot = (index, field, value) => {
     const newSlots = [...slots];
     newSlots[index][field] = value;
     setSlots(newSlots);
   };
 
-  // ------------------------------
-  // Add new slot row
-  // ------------------------------
   const addSlot = () => {
     const newSlot = {
       slot_number: slots.length + 1,
@@ -84,85 +78,118 @@ const Dashboard = () => {
     setSlots([...slots, newSlot]);
   };
 
-  // ------------------------------
-  // Save All Slots to Backend
-  // ------------------------------
+  // ------------------------------------------
+  // Save all slots
+  // ------------------------------------------
   const saveAllSlots = async () => {
     if (!guildId) return alert("Guild not selected!");
 
     try {
       setLoading(true);
-      setSaveStatus("Saving slots...");
+      setSaveStatus("💾 Saving slots...");
 
-      // Ensure slot_number is always numeric
       const formattedSlots = slots.map((slot, index) => ({
         ...slot,
         slot_number: Number(slot.slot_number || index + 1),
       }));
 
-      const response = await axios.post(
+      const res = await axios.post(
         `${backendURL}/api/guilds/${guildId}/slots/bulk_update`,
         { slots: formattedSlots },
         { headers: { "Content-Type": "application/json" } }
       );
 
-      console.log("✅ Backend response:", response.data);
+      console.log("✅ Saved:", res.data);
       setSaveStatus("✅ Slots saved successfully!");
     } catch (err) {
       console.error("❌ Save failed:", err.response?.data || err);
       setSaveStatus("❌ Failed to save all slots. Check console for details.");
     } finally {
       setLoading(false);
-      setTimeout(() => setSaveStatus(""), 5000);
+      setTimeout(() => setSaveStatus(""), 4000);
     }
   };
 
-  // ------------------------------
-  // Send Slots to a Channel
-  // ------------------------------
+  // ------------------------------------------
+  // Send slots to a Discord channel
+  // ------------------------------------------
   const sendSlots = async () => {
-    if (!guildId || !selectedChannel)
-      return alert("Please select a channel first!");
-
+    if (!selectedChannel) return alert("Select a channel first!");
     try {
       setLoading(true);
-      setSaveStatus("Sending slots to Discord...");
-
-      const response = await axios.post(
+      setSaveStatus("📤 Sending slots to Discord...");
+      const res = await axios.post(
         `${backendURL}/api/guilds/${guildId}/send_slots`,
         { channel_id: selectedChannel },
         { headers: { "Content-Type": "application/json" } }
       );
-
-      console.log("📤 Sent:", response.data);
+      console.log("✅ Sent:", res.data);
       setSaveStatus("✅ Slots sent successfully!");
     } catch (err) {
       console.error("❌ Send failed:", err.response?.data || err);
       setSaveStatus("❌ Failed to send slots.");
     } finally {
       setLoading(false);
-      setTimeout(() => setSaveStatus(""), 5000);
+      setTimeout(() => setSaveStatus(""), 4000);
     }
   };
 
-  // ------------------------------
-  // Render UI
-  // ------------------------------
-  if (loading && slots.length === 0) {
-    return <div className="loading">Loading guild data...</div>;
-  }
+  // ------------------------------------------
+  // Inline styles
+  // ------------------------------------------
+  const styles = {
+    container: {
+      maxWidth: "1200px",
+      margin: "40px auto",
+      fontFamily: "Arial, sans-serif",
+      textAlign: "center",
+    },
+    table: {
+      width: "100%",
+      borderCollapse: "collapse",
+      marginTop: "20px",
+    },
+    thtd: {
+      border: "1px solid #ccc",
+      padding: "8px",
+    },
+    button: {
+      margin: "8px",
+      padding: "10px 16px",
+      border: "none",
+      background: "#007bff",
+      color: "white",
+      borderRadius: "6px",
+      cursor: "pointer",
+    },
+    buttonHover: {
+      background: "#0056b3",
+    },
+    status: {
+      background: "#f3f3f3",
+      padding: "10px",
+      borderRadius: "6px",
+      marginBottom: "10px",
+      display: "inline-block",
+    },
+    select: { padding: "6px", borderRadius: "4px" },
+    input: { padding: "4px", borderRadius: "4px" },
+  };
 
+  // ------------------------------------------
+  // UI
+  // ------------------------------------------
   return (
-    <div className="dashboard">
+    <div style={styles.container}>
       <h1>🎮 Slot Manager Dashboard</h1>
 
-      {/* Save Status */}
-      {saveStatus && <div className="status">{saveStatus}</div>}
+      {saveStatus && <div style={styles.status}>{saveStatus}</div>}
 
-      {/* Channel Selector */}
-      <div className="channel-selector">
-        <label>Send to Channel:</label>
+      {/* Channel selection */}
+      <div style={{ marginBottom: "20px" }}>
+        <label style={{ marginRight: "10px" }}>Send to Channel:</label>
         <select
+          style={styles.select}
           value={selectedChannel}
           onChange={(e) => setSelectedChannel(e.target.value)}
         >
@@ -173,119 +200,127 @@ const Dashboard = () => {
             </option>
           ))}
         </select>
-        <button onClick={sendSlots} disabled={!selectedChannel || loading}>
+        <button
+          style={styles.button}
+          onClick={sendSlots}
+          disabled={!selectedChannel || loading}
+        >
           🚀 Send Slots
         </button>
       </div>
 
-      {/* Slots Table */}
-      <table className="slots-table">
+      {/* Table */}
+      <table style={styles.table}>
         <thead>
           <tr>
-            <th>Slot #</th>
-            <th>Team Name</th>
-            <th>Tag</th>
-            <th>Emoji</th>
-            <th>Background</th>
-            <th>Font</th>
-            <th>Size</th>
-            <th>Color</th>
-            <th>Padding Top</th>
-            <th>Padding Bottom</th>
+            {[
+              "Slot #",
+              "Team Name",
+              "Tag",
+              "Emoji",
+              "Background",
+              "Font",
+              "Size",
+              "Color",
+              "Pad Top",
+              "Pad Bottom",
+            ].map((h) => (
+              <th key={h} style={styles.thtd}>
+                {h}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {slots.map((slot, index) => (
-            <tr key={index}>
-              <td>{slot.slot_number}</td>
-              <td>
+          {slots.map((slot, i) => (
+            <tr key={i}>
+              <td style={styles.thtd}>{slot.slot_number}</td>
+              <td style={styles.thtd}>
                 <input
+                  style={styles.input}
                   value={slot.teamname}
-                  onChange={(e) =>
-                    updateSlot(index, "teamname", e.target.value)
-                  }
+                  onChange={(e) => updateSlot(i, "teamname", e.target.value)}
                 />
               </td>
-              <td>
+              <td style={styles.thtd}>
                 <input
+                  style={styles.input}
                   value={slot.teamtag}
-                  onChange={(e) =>
-                    updateSlot(index, "teamtag", e.target.value)
-                  }
+                  onChange={(e) => updateSlot(i, "teamtag", e.target.value)}
                 />
               </td>
-              <td>
+              <td style={styles.thtd}>
                 <select
+                  style={styles.select}
                   value={slot.emoji}
-                  onChange={(e) => updateSlot(index, "emoji", e.target.value)}
+                  onChange={(e) => updateSlot(i, "emoji", e.target.value)}
                 >
                   <option value="">None</option>
-                  {emojis.map((em, i) => (
-                    <option key={i} value={em.name}>
+                  {emojis.map((em, x) => (
+                    <option key={x} value={em.name}>
                       {em.name}
                     </option>
                   ))}
                 </select>
               </td>
-              <td>
+              <td style={styles.thtd}>
                 <select
+                  style={styles.select}
                   value={slot.background_name}
                   onChange={(e) =>
-                    updateSlot(index, "background_name", e.target.value)
+                    updateSlot(i, "background_name", e.target.value)
                   }
                 >
-                  {gifs.map((g, i) => (
-                    <option key={i} value={g.name}>
+                  {gifs.map((g, y) => (
+                    <option key={y} value={g.name}>
                       {g.name}
                     </option>
                   ))}
                 </select>
               </td>
-              <td>
+              <td style={styles.thtd}>
                 <input
+                  style={styles.input}
                   value={slot.font_family}
-                  onChange={(e) =>
-                    updateSlot(index, "font_family", e.target.value)
-                  }
+                  onChange={(e) => updateSlot(i, "font_family", e.target.value)}
                 />
               </td>
-              <td>
+              <td style={styles.thtd}>
                 <input
                   type="number"
+                  style={{ ...styles.input, width: "70px" }}
                   value={slot.font_size}
                   onChange={(e) =>
-                    updateSlot(index, "font_size", Number(e.target.value))
+                    updateSlot(i, "font_size", Number(e.target.value))
                   }
-                  style={{ width: "70px" }}
                 />
               </td>
-              <td>
+              <td style={styles.thtd}>
                 <input
                   type="color"
+                  style={styles.input}
                   value={slot.font_color}
-                  onChange={(e) =>
-                    updateSlot(index, "font_color", e.target.value)
-                  }
+                  onChange={(e) => updateSlot(i, "font_color", e.target.value)}
                 />
               </td>
-              <td>
+              <td style={styles.thtd}>
                 <input
                   type="number"
+                  style={{ ...styles.input, width: "70px" }}
                   value={slot.padding_top}
                   onChange={(e) =>
-                    updateSlot(index, "padding_top", Number(e.target.value))
+                    updateSlot(i, "padding_top", Number(e.target.value))
                   }
-                  style={{ width: "70px" }}
                 />
               </td>
-              <td>
+              <td style={styles.thtd}>
                 <input
                   type="number"
+                  style={{ ...styles.input, width: "70px" }}
                   value={slot.padding_bottom}
                   onChange={(e) =>
-                    updateSlot(index, "padding_bottom", Number(e.target.value))
+                    updateSlot(i, "padding_bottom", Number(e.target.value))
                   }
-                  style={{ width: "70px" }}
                 />
               </td>
             </tr>
@@ -294,10 +329,16 @@ const Dashboard = () => {
       </table>
 
       {/* Buttons */}
-      <div className="buttons">
-        <button onClick={addSlot}>➕ Add Slot</button>
-        <button onClick={saveAllSlots}>💾 Save All Slots</button>
+      <div style={{ marginTop: "20px" }}>
+        <button style={styles.button} onClick={addSlot}>
+          ➕ Add Slot
+        </button>
+        <button style={styles.button} onClick={saveAllSlots}>
+          💾 Save All Slots
+        </button>
       </div>
+
+      {loading && <div style={{ marginTop: "20px" }}>⏳ Working...</div>}
     </div>
   );
 };

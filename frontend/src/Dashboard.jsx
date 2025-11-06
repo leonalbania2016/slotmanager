@@ -34,10 +34,11 @@ export default function Dashboard({ guild_id }) {
           emojisRes.json(),
         ]);
 
-        setSlots(slotsData);
-        setBackgrounds(gifsData);
-        setChannels(channelsData);
-        setEmojis(emojisData);
+        // ✅ Normalize responses so they're always arrays
+        setSlots(Array.isArray(slotsData) ? slotsData : slotsData.slots || []);
+        setBackgrounds(Array.isArray(gifsData) ? gifsData : gifsData.gifs || []);
+        setChannels(Array.isArray(channelsData) ? channelsData : channelsData.channels || []);
+        setEmojis(Array.isArray(emojisData) ? emojisData : emojisData.emojis || []);
       } catch (err) {
         console.error("❌ Failed to load dashboard data:", err);
       } finally {
@@ -105,7 +106,8 @@ export default function Dashboard({ guild_id }) {
     }
   };
 
-  if (loading) return <div className="text-center p-10 text-gray-400">Loading...</div>;
+  if (loading)
+    return <div className="text-center p-10 text-gray-400">Loading...</div>;
 
   return (
     <div className="max-w-6xl mx-auto p-6 text-white">
@@ -120,11 +122,12 @@ export default function Dashboard({ guild_id }) {
           className="bg-gray-800 text-white p-2 rounded w-full"
         >
           <option value="">-- Choose a Channel --</option>
-          {channels.map((ch) => (
-            <option key={ch.id} value={ch.id}>
-              #{ch.name}
-            </option>
-          ))}
+          {Array.isArray(channels) &&
+            channels.map((ch) => (
+              <option key={ch.id} value={ch.id}>
+                #{ch.name}
+              </option>
+            ))}
         </select>
       </div>
 
@@ -149,81 +152,90 @@ export default function Dashboard({ guild_id }) {
 
       {/* Slots Editor */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {slots.map((slot, index) => (
-          <div
-            key={slot.slot_number}
-            className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-md"
-          >
-            <h2 className="text-xl font-semibold mb-2">Slot #{slot.slot_number}</h2>
-
-            <input
-              type="text"
-              placeholder="Team Name"
-              value={slot.teamname || ""}
-              onChange={(e) => updateSlot(index, "teamname", e.target.value)}
-              className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
-            />
-
-            <input
-              type="text"
-              placeholder="Team Tag"
-              value={slot.teamtag || ""}
-              onChange={(e) => updateSlot(index, "teamtag", e.target.value)}
-              className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
-            />
-
-            {/* Emoji Picker */}
-            <select
-              value={slot.emoji || ""}
-              onChange={(e) => updateSlot(index, "emoji", e.target.value)}
-              className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
+        {Array.isArray(slots) &&
+          slots.map((slot, index) => (
+            <div
+              key={slot.slot_number || index}
+              className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-md"
             >
-              <option value="">-- Choose Emoji --</option>
-              {emojis.map((em) => (
-                <option key={em.id} value={em.format}>
-                  {em.name}
-                </option>
-              ))}
-            </select>
+              <h2 className="text-xl font-semibold mb-2">
+                Slot #{slot.slot_number}
+              </h2>
 
-            {/* Background Selector */}
-            <select
-              value={slot.background_url || ""}
-              onChange={(e) => updateSlot(index, "background_url", e.target.value)}
-              className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
-            >
-              <option value="">-- Choose Background --</option>
-              {backgrounds.map((bg, i) => (
-                <option key={i} value={bg.url}>
-                  {bg.name}
-                </option>
-              ))}
-            </select>
+              <input
+                type="text"
+                placeholder="Team Name"
+                value={slot.teamname || ""}
+                onChange={(e) => updateSlot(index, "teamname", e.target.value)}
+                className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
+              />
 
-            <div className="flex gap-2">
               <input
-                type="number"
-                placeholder="Font Size"
-                value={slot.font_size || 48}
-                onChange={(e) => updateSlot(index, "font_size", parseInt(e.target.value))}
-                className="w-1/3 p-2 bg-gray-800 rounded text-white"
+                type="text"
+                placeholder="Team Tag"
+                value={slot.teamtag || ""}
+                onChange={(e) => updateSlot(index, "teamtag", e.target.value)}
+                className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
               />
-              <input
-                type="color"
-                value={slot.font_color || "#FFFFFF"}
-                onChange={(e) => updateSlot(index, "font_color", e.target.value)}
-                className="w-1/3 h-10 rounded"
-              />
-              <input
-                type="number"
-                placeholder="Padding Top"
-                value={slot.padding_top || 0}
-                onChange={(e) => updateSlot(index, "padding_top", parseInt(e.target.value))}
-                className="w-1/3 p-2 bg-gray-800 rounded text-white"
-              />
+
+              {/* Emoji Picker */}
+              <select
+                value={slot.emoji || ""}
+                onChange={(e) => updateSlot(index, "emoji", e.target.value)}
+                className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
+              >
+                <option value="">-- Choose Emoji --</option>
+                {Array.isArray(emojis) &&
+                  emojis.map((em) => (
+                    <option key={em.id || em.name} value={em.format || em.name}>
+                      {em.name}
+                    </option>
+                  ))}
+              </select>
+
+              {/* Background Selector */}
+              <select
+                value={slot.background_url || ""}
+                onChange={(e) => updateSlot(index, "background_url", e.target.value)}
+                className="w-full p-2 mb-2 bg-gray-800 rounded text-white"
+              >
+                <option value="">-- Choose Background --</option>
+                {Array.isArray(backgrounds) &&
+                  backgrounds.map((bg, i) => (
+                    <option key={i} value={bg.url || bg}>
+                      {bg.name || bg}
+                    </option>
+                  ))}
+              </select>
+
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  placeholder="Font Size"
+                  value={slot.font_size || 48}
+                  onChange={(e) =>
+                    updateSlot(index, "font_size", parseInt(e.target.value))
+                  }
+                  className="w-1/3 p-2 bg-gray-800 rounded text-white"
+                />
+                <input
+                  type="color"
+                  value={slot.font_color || "#FFFFFF"}
+                  onChange={(e) => updateSlot(index, "font_color", e.target.value)}
+                  className="w-1/3 h-10 rounded"
+                />
+                <input
+                  type="number"
+                  placeholder="Padding Top"
+                  value={slot.padding_top || 0}
+                  onChange={(e) =>
+                    updateSlot(index, "padding_top", parseInt(e.target.value))
+                  }
+                  className="w-1/3 p-2 bg-gray-800 rounded text-white"
+                />
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
       </div>
     </div>
   );

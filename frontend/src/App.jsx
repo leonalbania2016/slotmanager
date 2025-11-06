@@ -1,13 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { BrowserRouter as Router, Routes, Route, useNavigate } from "react-router-dom";
+import { Routes, Route, useNavigate, useParams } from "react-router-dom";
 import Dashboard from "./Dashboard";
 import SelectGuild from "./SelectGuild";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
 const FRONTEND_URL = import.meta.env.VITE_FRONTEND_URL || "http://localhost:5173";
-
-// ⚙️ This should point to your frontend’s OAuth redirect route
 const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || `${FRONTEND_URL}/`;
 
 function Home() {
@@ -15,14 +13,13 @@ function Home() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  // 🧩 When Discord redirects back with ?session=XYZ
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const session = params.get("session");
 
     if (session) {
       localStorage.setItem("discord_session", session);
-      window.history.replaceState({}, document.title, "/"); // clean URL
+      window.history.replaceState({}, document.title, "/");
     }
 
     const fetchGuilds = async () => {
@@ -47,7 +44,6 @@ function Home() {
     fetchGuilds();
   }, []);
 
-  // 🔗 Discord login redirect
   const loginWithDiscord = () => {
     const redirect = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(
       REDIRECT_URI
@@ -55,7 +51,6 @@ function Home() {
     window.location.href = redirect;
   };
 
-  // 🧭 Navigate to dashboard
   const handleSelectGuild = (guild_id) => {
     navigate(`/dashboard/${guild_id}`);
   };
@@ -101,20 +96,17 @@ function Home() {
   );
 }
 
-export default function App() {
-  return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/dashboard/:guild_id" element={<DashboardWrapper />} />
-        <Route path="/select-guild" element={<SelectGuild />} />
-      </Routes>
-    </Router>
-  );
-}
-
-// Wrapper to extract :guild_id from URL
 function DashboardWrapper() {
   const { guild_id } = useParams();
   return <Dashboard guild_id={guild_id} />;
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/dashboard/:guild_id" element={<DashboardWrapper />} />
+      <Route path="/select-guild" element={<SelectGuild />} />
+    </Routes>
+  );
 }

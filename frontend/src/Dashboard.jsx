@@ -65,30 +65,38 @@ const saveAllSlots = async () => {
 
   setSaving(true);
   try {
-    const res = await fetch(`${API_URL}/api/guilds/${guild_id}/slots/bulk_update`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        slots: slots.map((slot) => ({
-          slot_number: slot.slot_number,
-          teamname: slot.teamname || "",
-          teamtag: slot.teamtag || "",
-          emoji: slot.emoji || "",
-          background_name: slot.background_url || "default.gif",
-          font_family: slot.font_family || "DejaVuSans.ttf",
-          font_size: slot.font_size || 64,
-          font_color: slot.font_color || "#FFFFFF",
-          padding_top: slot.padding_top || 0,
-          padding_bottom: slot.padding_bottom || 0,
-        })),
-      }),
-    });
+    const formattedSlots = slots.map((slot, index) => ({
+      slot_number: slot.slot_number || index + 1,
+      teamname: slot.teamname || "",
+      teamtag: slot.teamtag || "",
+      emoji: slot.emoji || "",
+      background_name: slot.background_url || "default.gif",
+      font_family: slot.font_family || "DejaVuSans.ttf",
+      font_size: slot.font_size || 64,
+      font_color: slot.font_color || "#FFFFFF",
+      padding_top: slot.padding_top || 0,
+      padding_bottom: slot.padding_bottom || 0,
+    }));
 
-    if (!res.ok) throw new Error("Bulk save failed");
+    const res = await fetch(
+      `${API_URL}/api/guilds/${guild_id}/slots/bulk_update`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slots: formattedSlots }), // ✅ correct shape
+      }
+    );
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("Backend error:", err);
+      throw new Error("Bulk save failed");
+    }
+
     alert("✅ All slots saved successfully!");
   } catch (err) {
-    console.error(err);
-    alert("❌ Failed to save all slots.");
+    console.error("Save failed:", err);
+    alert("❌ Failed to save all slots. Check console for details.");
   } finally {
     setSaving(false);
   }

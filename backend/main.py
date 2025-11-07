@@ -715,4 +715,29 @@ def auth_callback(code: str):
         f"&guilds={encoded_guilds}"
     )
     return RedirectResponse(url=redirect_url)
+from fastapi.responses import RedirectResponse
 
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+REDIRECT_URI = os.getenv(
+    "REDIRECT_URI", "https://slotmanager-backend.onrender.com/auth/callback"
+)
+FRONTEND_URL = os.getenv(
+    "FRONTEND_URL", "https://slotmanager-frontend.onrender.com"
+)
+
+@app.get("/login")
+def discord_login():
+    """
+    Redirect the user to Discord OAuth2 authorization page.
+    """
+    if not DISCORD_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="DISCORD_CLIENT_ID not configured")
+
+    params = (
+        f"client_id={DISCORD_CLIENT_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&response_type=code"
+        f"&scope=identify%20guilds"
+    )
+
+    return RedirectResponse(url=f"https://discord.com/api/oauth2/authorize?{params}")

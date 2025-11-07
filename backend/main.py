@@ -660,8 +660,11 @@ def send_slots(guild_id: str, body: SendSlotsBody):
 # =============================================================================
 @app.get("/auth/callback")
 def auth_callback(code: str):
-    if not all([DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, REDIRECT_URI]):
-        raise HTTPException(status_code=500, detail="OAuth not configured")
+    """
+    Handles Discord OAuth callback, fetches user info + guilds,
+    and redirects to the frontend dashboard with guild_id, user_id, username.
+    """
+    import httpx
 
     token_url = "https://discord.com/api/oauth2/token"
     data = {
@@ -672,49 +675,48 @@ def auth_callback(code: str):
         "redirect_uri": REDIRECT_URI,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    token_response = httpx.post(token_url, data=data, headers=headers, timeout=20.0)
+
+    token_response = httpx.post(token_url, data=data, headers=headers)
     if token_response.status_code != 200:
+        print("Token error:", token_response.text)
         raise HTTPException(status_code=400, detail="Failed to get access token")
 
-    token_json = token_response.json()
-    access_token = token_json.get("access_token")
+    access_token = token_response.json().get("access_token")
     if not access_token:
         raise HTTPException(status_code=400, detail="Missing access token")
 
-    # Fetch user and guilds
+    # 1️⃣ Get user info
     user_data = httpx.get(
         "https://discord.com/api/users/@me",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=15.0,
+        headers={"Authorization": f"Bearer {access_token}"}
     ).json()
 
+    user_id = user_data.get("id")
+    username = user_data.get("username")
+
+    # 2️⃣ Get user's guilds
     guilds_resp = httpx.get(
         "https://discord.com/api/users/@me/guilds",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=15.0,
+        headers={"Authorization": f"Bearer {access_token}"}
     )
 
     if guilds_resp.status_code != 200:
+        print("Guilds error:", guilds_resp.text)
         raise HTTPException(status_code=400, detail="Failed to fetch guilds")
 
     guilds = guilds_resp.json()
-    allowed = [
-        {"id": g["id"], "name": g["name"]}
-        for g in guilds
-        if g.get("permissions", 0) & 0x20  # MANAGE_GUILD
-    ]
+    if not guilds:
+        raise HTTPException(status_code=400, detail="No accessible guilds found")
 
-    # Redirect to frontend with token and data
-    encoded_guilds = quote(json.dumps(allowed))
-    encoded_token = quote(access_token)
-    redirect_url = (
-        f"{FRONTEND_URL}/select-guild?"
-        f"user_id={user_data['id']}"
-        f"&username={quote(user_data['username'])}"
-        f"&token={encoded_token}"
-        f"&guilds={encoded_guilds}"
-    )
+    # Pick the first guild for now (or later you can add a selection page)
+    guild_id = guilds[0]["id"]
+
+    # 3️⃣ Redirect user to dashboard with data
+    redirect_url = f"{FRONTEND_URL}/dashboard?guild_id={guild_id}&user_id={user_id}&username={username}"
+    print(f"✅ Redirecting user to: {redirect_url}")
+
     return RedirectResponse(url=redirect_url)
+
 from fastapi.responses import RedirectResponse
 
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")

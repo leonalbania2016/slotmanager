@@ -36,23 +36,21 @@ const NotFound = () => (
 
 function App() {
   return (
-    <Router>
-      <Layout>
-        <Routes>
-          {/* Default route: Login and guild selection */}
-          <Route path="/" element={<SelectGuild />} />
+    <Layout>
+      <Routes>
+        {/* Default route: Login and guild selection */}
+        <Route path="/" element={<SelectGuild />} />
 
-          {/* Dashboard (guild_id comes from query param like ?guild_id=123) */}
-          <Route path="/dashboard" element={<Dashboard />} />
+        {/* Dashboard */}
+        <Route path="/dashboard" element={<Dashboard />} />
 
-          {/* Old route redirect (optional) */}
-          <Route path="/select-guild" element={<Navigate to="/" replace />} />
+        {/* Old route redirect (optional) */}
+        <Route path="/select-guild" element={<Navigate to="/" replace />} />
 
-          {/* Fallback 404 */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Layout>
-    </Router>
+        {/* Fallback 404 */}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Layout>
   );
 }
 
